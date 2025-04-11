@@ -44,22 +44,6 @@ module.exports = (app, pool) => {
             res.status(500).send('Chyba na serveri');
         }
     });
-    app.post('/users', async (req, res) => {
-        const { username, email, bio, password } = req.body;
-
-        try {
-            const result = await pool.query(
-                `INSERT INTO users (username, email, bio, password)
-       VALUES ($1, $2, $3, $4)
-       RETURNING *`,
-                [username, email, bio, password]
-            );
-            res.status(201).json(result.rows[0]);
-        } catch (err) {
-            console.error(err.message);
-            res.status(500).send('Chyba pri ukladaní používateľa');
-        }
-    });
 
     app.post('/users/:id/trip', async (req, res) => {
         const user_id = parseInt(req.params.id); // používame ID z URL
