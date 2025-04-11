@@ -140,4 +140,81 @@ app.delete('/users/:id/trip/:trip_id', async (req, res) => {
     }
   });
   
+  app.post('/markers', async (req, res) => {
+    const {
+      trip_id,
+      x_pos,
+      y_pos,
+      marker_title,
+      marker_description,
+      trip_date
+    } = req.body;
+  
+    try {
+      const tripCheck = await pool.query(
+        'SELECT trip_id FROM trip WHERE trip_id = $1',
+        [trip_id]
+      );
+  
+      if (tripCheck.rowCount === 0) {
+        return res.status(404).json({ error: 'Výlet (trip) neexistuje' });
+      }
+  
+      const result = await pool.query(
+        `INSERT INTO markers (
+          trip_id, x_pos, y_pos, marker_title, marker_description, trip_date
+        ) VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING *`,
+        [trip_id, x_pos, y_pos, marker_title, marker_description, trip_date]
+      );
+  
+      res.status(201).json({
+        message: 'Marker bol úspešne vytvorený',
+        marker: result.rows[0]
+      });
+    } catch (error) {
+      console.error('Chyba pri vytváraní markeru:', error);
+      res.status(500).json({ error: 'Chyba na serveri' });
+    }
+  });
+
+  app.get('/markers/:trip_id', async (req, res) => {
+    const trip_id = parseInt(req.params.trip_id);
+  
+    try {
+      const result = await pool.query(
+        'SELECT * FROM markers WHERE trip_id = $1',
+        [trip_id]
+      );
+  
+      res.status(200).json(result.rows);
+    } catch (error) {
+      console.error('Chyba pri načítaní markerov:', error);
+      res.status(500).json({ error: 'Chyba na serveri' });
+    }
+  });
+
+  app.delete('/markers/:marker_id', async (req, res) => {
+    const marker_id = parseInt(req.params.marker_id);
+  
+    try {
+      const result = await pool.query(
+        'DELETE FROM markers WHERE marker_id = $1 RETURNING *',
+        [marker_id]
+      );
+  
+      if (result.rowCount === 0) {
+        return res.status(404).json({ error: 'Marker neexistuje' });
+      }
+  
+      res.status(200).json({
+        message: 'Marker bol úspešne odstránený',
+        deleted: result.rows[0]
+      });
+    } catch (error) {
+      console.error('Chyba pri mazaní markeru:', error);
+      res.status(500).json({ error: 'Chyba na serveri' });
+    }
+  });
+
 }
