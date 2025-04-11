@@ -61,4 +61,99 @@ module.exports = (app, pool) => {
         }
     });
 
+    app.post('/users/:id/trip', async (req, res) => {
+        const user_id = parseInt(req.params.id); // používame ID z URL
+        const {
+          trip_title,
+          trip_description,
+          rating,
+          visibility,
+          start_date,
+          end_date
+        } = req.body;
+      
+        try {
+          // Over kontrolu používateľa
+          const userCheck = await pool.query(
+            'SELECT id FROM users WHERE id = $1',
+            [user_id]
+          );
+      
+          if (userCheck.rowCount === 0) {
+            return res.status(404).json({ error: 'Používateľ neexistuje' });
+          }
+      
+          const result = await pool.query(
+            `INSERT INTO trip (
+              user_id, trip_title, trip_description, rating,
+              visibility, start_date, end_date
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING *`,
+            [
+              user_id,
+              trip_title,
+              trip_description,
+              rating,
+              visibility,
+              start_date,
+              end_date
+            ]
+          );
+      
+          res.status(201).json({
+            message: 'Výlet bol úspešne vytvorený',
+            trip: result.rows[0]
+          });
+        } catch (error) {
+          console.error('Chyba pri vytváraní výletu:', error);
+          res.status(500).json({ error: 'Chyba na serveri' });
+        }
+      });
+
+      app.get('/users/:id/trip', async (req, res) => {
+        const user_id = parseInt(req.params.id);
+      
+        try {
+          const result = await pool.query(
+            'SELECT * FROM trip WHERE user_id = $1',
+            [user_id]
+          );
+      
+          res.json(result.rows);
+        } catch (err) {
+          console.error('Chyba pri načítavaní výletov:', err.message);
+          res.status(500).send('Chyba na serveri');
+        }
+      });
+
+      // Odstránenie výletu pre používateľa
+app.delete('/users/:id/trip/:trip_id', async (req, res) => {
+    const user_id = parseInt(req.params.id); // Získanie user_id z URL parametra
+    const trip_id = parseInt(req.params.trip_id); // Získanie trip_id z URL parametra
+  
+    try {
+      // Over, či tento používateľ vlastní daný výlet
+      const result = await pool.query(
+        'SELECT * FROM trip WHERE user_id = $1 AND trip_id = $2',
+        [user_id, trip_id]
+      );
+  
+      if (result.rowCount === 0) {
+        return res.status(404).json({ error: 'Výlet neexistuje alebo nepatrí tomuto používateľovi.' });
+      }
+  
+      // Ak existuje výlet, odstráni ho
+      await pool.query(
+        'DELETE FROM trip WHERE user_id = $1 AND trip_id = $2',
+        [user_id, trip_id]
+      );
+  
+      res.status(200).json({ message: 'Výlet bol úspešne odstránený.' });
+    } catch (err) {
+      console.error('Chyba pri odstraňovaní výletu:', err.message);
+      res.status(500).send('Chyba na serveri');
+    }
+  });
+  
 }
