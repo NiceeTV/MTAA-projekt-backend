@@ -1,19 +1,17 @@
 module.exports = (app, pool, authenticateToken) => {
 
+    /*** DEPENDENCIES ***/
     const bcrypt = require('bcrypt');
-
     const upload = require('./multer_conf');
-
-
-    require('./api_endpoints1')(app, pool);
-
-
+    const path = require('path');
+    const fs = require('fs');
     const jwt = require('jsonwebtoken'); // Načítaj knižnicu pre JWT
     const dotenv = require('dotenv');    // Načítaj .env
-
+    require('./api_endpoints1')(app, pool);
     dotenv.config();  // Načítaj premenné z .env
 
 
+    /*** FUNKCIE ***/
     async function checkUserExists(user_id, res) {
         const userCheck = await pool.query('SELECT * FROM users WHERE id = $1', [user_id]);
         if (userCheck.rowCount === 0) {
@@ -30,16 +28,110 @@ module.exports = (app, pool, authenticateToken) => {
     }
 
 
+    /* Spoločná funkcia pre spracovanie nahrávania obrázkov */
+    async function handleImageUpload(req, res) {
+        const { user_id, image_type, trip_id } = req.params;
+        const files = req.files;
+
+        if (!files || files.length === 0) { /* ak tam nie sú nahraté obrázky */
+            return res.status(400).json({ error: 'Žiadne obrázky neboli nahrané' });
+        }
+
+        try {
+            /* či existuje user */
+            const userStatus = await checkUserExists(user_id, res);
+            if (userStatus) return userStatus;
+
+            const imageUrls = [];
+
+            /* trip obrázky */
+            if (image_type === 'trip_images') {
+                if (!trip_id) { /* ak som nezadal trip_id */
+                    return res.status(400).json({ error: 'Chýba trip_id pre nahrávanie trip obrázkov' });
+                }
+
+                /* či existuje trip záznam */
+                const tripStatus = await checkTripExists(user_id, trip_id, res);
+                if (tripStatus) return tripStatus;
+
+                /* každý súbor sa uploadne */
+                for (const file of files) {
+                    const imagePath = `/images/${user_id}/trip_images/${trip_id}/${file.filename}`;
+                    imageUrls.push(imagePath);
+
+                    /* vkladanie do databázy url obrázkov */
+                    await pool.query(
+                        'INSERT INTO trip_images (trip_id, image_url) VALUES ($1, $2)',
+                        [trip_id, imagePath]
+                    );
+                }
+            }
+
+            /* profilovka */
+            else if (image_type === 'profile_images') {
+                const file = files[0]; // len jeden profilový obrázok
+                const newImagePath = `/images/${user_id}/profile_images/${file.filename}`;
+                imageUrls.push(newImagePath);
+
+                // Získaj pôvodný profilový obrázok z profile_picture tabuľky
+                const result = await pool.query(
+                    'SELECT image_url FROM profile_picture WHERE user_id = $1',
+                    [user_id]
+                );
+
+                const oldImagePath = result.rows[0]?.image_url;
+
+                // Vymaž starý obrázok ak existuje a nie je null
+                if (oldImagePath) {
+                    const fullOldPath = path.join(__dirname, oldImagePath);
+                    if (fs.existsSync(fullOldPath)) {
+                        fs.unlink(fullOldPath, (err) => {
+                            if (err) console.error('Chyba pri mazaní starého profilového obrázka:', err);
+                            else console.log('Starý profilový obrázok zmazaný:', fullOldPath);
+                        });
+                    }
+
+                    // UPDATE existujúceho záznamu
+                    await pool.query(
+                        'UPDATE profile_picture SET image_url = $1 WHERE user_id = $2',
+                        [newImagePath, user_id]
+                    );
+                } else {
+                    // INSERT ak žiadny obrázok ešte neexistuje
+                    await pool.query(
+                        'INSERT INTO profile_picture (user_id, image_url) VALUES ($1, $2)',
+                        [user_id, newImagePath]
+                    );
+                }
+            }
+            /* nesprávne napísaný image_type :) */
+            else {
+                return res.status(400).json({ error: 'Neznámy typ obrázkov (image_type)' });
+            }
+
+            res.status(201).json({
+                message: 'Obrázky boli úspešne nahrané',
+                images: imageUrls
+            });
+
+        } catch (err) {
+            console.error('Chyba pri ukladaní obrázkov:', err);
+            res.status(500).json({ error: 'Chyba na serveri' });
+        }
+    }
 
 
 
+
+
+    /*** ENDPOINTY ***/
     /* úvodná stránka api */
     app.get('/', (req, res) => {
         res.send('API beží správne 🚀');
     });
 
 
-    /* autentifikácia cez JWT */
+    /** autentifikácia cez JWT **/
     /* register */
     app.post('/users/register', async (req, res) => {
         const { username, email, password } = req.body;
@@ -109,79 +201,99 @@ module.exports = (app, pool, authenticateToken) => {
 
 
     /* trip management */
-    /* vytvorenie tripu */
-    app.post('/create-trip', authenticateToken, async (req, res) => {
-        const { trip_title, trip_description, rating, start_date, end_date, visibility } = req.body;
-        const userId = req.user.userId;
-
-
+    /* get trips */
+    app.get('/trip/:trip_id', authenticateToken, async (req, res) => {
+        const trip_id = parseInt(req.params.trip_id); // získanie trip_id z parametrov URL
         try {
-            /* či existuje user */
-            const userStatus = await checkUserExists(userId, res);
-            if (userStatus) return userStatus;
-
-
+            // Overíme, či výlet s daným ID existuje
             const result = await pool.query(
-                `INSERT INTO trip (user_id, trip_title, trip_description, rating, visibility, start_date, end_date)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
-             RETURNING *`,
-                [userId, trip_title, trip_description, rating, visibility, start_date, end_date]
+                'SELECT * FROM trip WHERE trip_id = $1',
+                [trip_id]
             );
 
-            res.status(201).json({
-                message: 'Trip bol úspešne vytvorený',
+            // Ak výlet neexistuje
+            if (result.rowCount === 0) {
+                return res.status(404).json({ error: 'Výlet s týmto ID neexistuje' });
+            }
+
+            // Vrátime detail výletu
+            res.status(200).json({
                 trip: result.rows[0]
             });
-        } catch (err) {
-            console.error('Chyba pri vytváraní tripu:', err);
-            res.status(500).json({ error: 'Chyba na serveri pri vytváraní tripu' });
+        } catch (error) {
+            console.error('Chyba pri získavaní výletu:', error);
+            res.status(500).json({ error: 'Chyba na serveri' });
         }
     });
 
 
 
     /* trip image management */
-    /* nahranie obrázka */
-    app.post('/upload-trip-images/:user_id/:trip_id', authenticateToken, upload.array('images'), async (req, res) => {
-        const { user_id, trip_id } = req.params; /* zoberieme user_id a trip_id kam to uložiť */
-        const files = req.files;  //nahrané súbory
+    /* nahranie profilovky */
+    app.post('/upload-images/:user_id/:image_type', authenticateToken, upload.array('images'), handleImageUpload);
 
-        if (!files || files.length === 0) { /* ak som nenahral nič */
-            return res.status(400).json({ error: 'Žiadne obrázky neboli nahrané' });
-        }
+    /* nahranie trip obrázkov */
+    app.post('/upload-images/:user_id/:image_type/:trip_id', authenticateToken, upload.array('images'), handleImageUpload);
+
+
+    /* získanie obrázkov k tripu podla trip_id */
+    app.get('/trip/:trip_id/images', async (req, res) => {
+        const { trip_id } = req.params;  // získať trip_id z parametrov URL
 
         try {
-            /* či existuje user a trip */
-            const userStatus = await checkUserExists(user_id, res);
-            if (userStatus) return userStatus;
+            const tripResult = await pool.query('SELECT * FROM trip WHERE trip_id = $1', [trip_id]);
 
-            const tripStatus = await checkTripExists(user_id, trip_id, res);
-            if (tripStatus) return tripStatus;
-
-
-
-            //pre každý obrázok spravíme unikátnu path
-            const imageUrls = [];
-            for (const file of files) {
-                const imagePath = `/images/${user_id}/${trip_id}/${file.filename}`;
-                imageUrls.push(imagePath);
-
-                //upload do databázy
-                await pool.query(
-                    'INSERT INTO trip_images (trip_id, image_url) VALUES ($1, $2)',
-                    [trip_id, imagePath]
-                );
+            if (tripResult.rowCount === 0) {
+                return res.status(404).json({ error: 'Trip neexistuje' });
             }
 
-            res.status(201).json({
-                message: 'Obrázky boli úspešne nahrané',
-                images: imageUrls
+            // Získať obrázky pre daný trip
+            const imagesResult = await pool.query('SELECT image_url FROM trip_images WHERE trip_id = $1', [trip_id]);
+
+            if (imagesResult.rowCount === 0) {
+                return res.status(404).json({ error: 'Žiadne obrázky k tomuto tripu' });
+            }
+
+            // Vytvoriť pole obrázkových URL
+            const images = imagesResult.rows.map(row => row.image_url);
+
+            // Vrátiť obrázky
+            res.status(200).json({
+                message: 'Obrázky pre tento trip',
+                images: images
             });
+
         } catch (err) {
-            console.error('Chyba pri ukladaní obrázkov:', err);
-            res.status(500).json({ error: 'Chyba na serveri' });
+            console.error('Chyba pri načítavaní obrázkov:', err);
+            res.status(500).json({ error: 'Chyba na serveri pri načítavaní obrázkov' });
         }
     });
 
+
+    /* funkcia na poslanie obrázka zo servera */
+    function sendImage(res, imagePath) {
+        if (fs.existsSync(imagePath)) {
+            return res.sendFile(imagePath);
+        } else {
+            return res.status(404).json({ error: 'Obrázok neexistuje' });
+        }
+    }
+
+
+
+    /* získanie jedného trip image obrázka z backendu cez url */
+    app.get('/images/:user_id/trip_images/:trip_id/:filename', async (req, res) => {
+        const { user_id, trip_id, filename } = req.params;
+        const imagePath = path.join(__dirname, 'images', user_id, 'trip_images', trip_id, filename);
+        return sendImage(res, imagePath);
+    });
+
+
+    /* získanie jedného profilového obrázka z backendu cez url */
+    app.get('/images/:user_id/profile_images/:filename', async (req, res) => {
+        const { user_id, filename } = req.params;
+        const imagePath = path.join(__dirname, 'images', user_id, 'profile_images', filename);
+        return sendImage(res, imagePath);
+    });
 
 }

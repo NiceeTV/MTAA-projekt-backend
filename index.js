@@ -1,13 +1,11 @@
-
-
 const express = require('express');
 const pool = require('./db');
 const app = express();
 const jwt = require('jsonwebtoken');
-
+const path = require('path');
 
 app.use(express.json());
-
+app.use('/images', express.static(path.join(__dirname, 'public/images')));
 
 function authenticateToken(req, res, next) {
   const token = req.header('Authorization')?.replace('Bearer ', '');
@@ -34,8 +32,9 @@ require('./api_endpoints2')(app, pool, authenticateToken);
 
 
 const PORT = 3000;
-app.listen(PORT, () => {
-  console.log(`Server beží na http://localhost:${PORT}`);
+const hostname = '192.168.0.105';
+app.listen(PORT, hostname, () => {
+  console.log(`Server beží na ${hostname}:${PORT}`);
 });
 
 module.exports = { authenticateToken };

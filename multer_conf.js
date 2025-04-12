@@ -7,25 +7,27 @@ const storage = multer.diskStorage({
     destination: function (req, file, cb) {
         const { user_id, trip_id } = req.params;  // Získame user_id a trip_id z parametrov URL
 
-        // Kontrola prítomnosti user_id a trip_id
-        if (!user_id || !trip_id) {
-            return cb(new Error('user_id alebo trip_id chýbajú v parametroch URL'), null);
+        let dir;  //cesta k adresáru
+
+        //ak je tam trip_id, tak to uloží ako trip image, ináč ako profilovku
+        if (trip_id) {
+            dir = path.join(__dirname, 'images', user_id, 'trip_images', trip_id);  // Cesta pre obrázok k tripu
+        } else {
+            //profilovka
+            dir = path.join(__dirname, 'images', user_id, 'profile_images');  // Cesta pre profilový obrázok
         }
 
-        // Cesta k adresáru, kde budú uložené obrázky
-        const dir = path.join(__dirname, 'images', user_id, trip_id);
-
-        // Asynchrónne vytváranie adresára
+        //vytvorenie adresára ak neexistuje
         fs.mkdir(dir, { recursive: true }, (err) => {
             if (err) {
                 console.error('Chyba pri vytváraní adresára:', err);
-                return cb(err, null);  // Ak sa vyskytne chyba pri vytváraní adresára
+                return cb(err, null);  //error pri vytváraní adresára
             }
-            cb(null, dir);  // Po úspešnom vytvorení adresára nastavíme destináciu
+            cb(null, dir);  //nastavenie destinácie kde sa to uloží
         });
     },
     filename: function (req, file, cb) {
-        // Vytvoríme unikátny názov pre súbor
+        //unikátny názov pre súbor
         const uniqueName = Date.now() + '-' + file.originalname;
         cb(null, uniqueName);  // Nastavíme unikátny názov pre obrázok
     }
