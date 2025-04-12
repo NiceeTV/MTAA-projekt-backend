@@ -3,11 +3,11 @@
 # ✅ TODO – Endpointy
 
 ## 🔔 Notifikácie
-- [ ] `GET /GetNotifications`
-- [ ] `POST /CreateNotification` – Pridám si priateľa, zdieľam trip
+- [✅] `GET /GetNotifications`
+- [✅] `POST /CreateNotification` – Pridám si priateľa, zdieľam trip
 
 ## 🧭 Markery
-- [ ] `GET /GetMarkers` – všetky
+- [✅] `GET /GetMarkers` – všetky
 - [✅] `GET /GetTripMarkers`
 - [✅] `GET /GetMarkerByID`
 - [✅] `POST /CreateMarker`
@@ -35,4 +35,4 @@
 - [ ] `GET /GetUserFriends`
 
 ## 📊 Štatistiky
-- [ ] `GET /GetStatistics`
+- [✅] `GET /GetStatistics`

@@ -7,7 +7,7 @@ module.exports = (app, pool, authenticateToken) => {
     const fs = require('fs');
     const jwt = require('jsonwebtoken'); // Načítaj knižnicu pre JWT
     const dotenv = require('dotenv');    // Načítaj .env
-    require('./api_endpoints1')(app, pool);
+    //require('./api_endpoints1')(app, pool);
     dotenv.config();  // Načítaj premenné z .env
 
 
@@ -20,7 +20,6 @@ module.exports = (app, pool, authenticateToken) => {
     }
 
     async function checkTripExists(user_id,trip_id,res) {
-        console.log(user_id,trip_id);
         const tripCheck = await pool.query('SELECT trip_id FROM trip WHERE trip_id = $1 AND user_id = $2', [trip_id, user_id]);
         if (tripCheck.rowCount === 0) {
             return res.status(404).json({error: 'Výlet s týmto ID neexistuje alebo nepatrí tomuto používateľovi'});
@@ -295,5 +294,41 @@ module.exports = (app, pool, authenticateToken) => {
         const imagePath = path.join(__dirname, 'images', user_id, 'profile_images', filename);
         return sendImage(res, imagePath);
     });
+
+
+
+    /*** MARKERS ***/
+    /* getUserMarkers */
+    app.get('/markers/getMarkersByID/:user_id', authenticateToken, async (req, res) => {
+        const { user_id } = req.params;  // Získame user_id z parametrov URL
+
+        try {
+            // SQL dopyt na získanie markerov používateľa
+            const query = `
+              SELECT *
+              FROM markers m
+              WHERE m.user_id = $1;
+            `;
+
+            const result = await pool.query(query, [user_id]);  // vykonáme dopyt
+
+            if (result.rows.length === 0) {
+                return res.status(404).json({ message: 'Žiadne markery nenájdené pre tohoto používateľa.' });
+            }
+
+            // Vrátime výsledky
+            res.status(200).json(result.rows);
+
+        } catch (err) {
+            console.error('Chyba pri získavaní markerov:', err);
+            res.status(500).json({ error: 'Chyba na serveri' });
+        }
+    });
+
+
+
+
+
+
 
 }

@@ -69,6 +69,7 @@ CREATE TABLE multi_day_trip_trip (
 -- markery tripu
 CREATE TABLE markers (
   marker_id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   x_pos FLOAT NOT NULL,
   y_pos FLOAT NOT NULL,
   marker_title TEXT NOT NULL,

@@ -1,4 +1,5 @@
-module.exports = (app, pool) => {
+module.exports = (app, pool, authenticateToken) => {
+
     app.delete('/users/:id', async (req, res) => {
         const { id } = req.params;
 
@@ -139,42 +140,27 @@ app.delete('/users/:id/trip/:trip_id', async (req, res) => {
       res.status(500).send('Chyba na serveri');
     }
   });
-  
-  app.post('/markers', async (req, res) => {
-    const {
-      trip_id,
-      x_pos,
-      y_pos,
-      marker_title,
-      marker_description,
-      trip_date
-    } = req.body;
-  
-    try {
-      const tripCheck = await pool.query(
-        'SELECT trip_id FROM trip WHERE trip_id = $1',
-        [trip_id]
-      );
-  
-      if (tripCheck.rowCount === 0) {
-        return res.status(404).json({ error: 'Výlet (trip) neexistuje' });
-      }
-  
-      const result = await pool.query(
-        `INSERT INTO markers (
-          trip_id, x_pos, y_pos, marker_title, marker_description, trip_date
-        ) VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING *`,
-        [trip_id, x_pos, y_pos, marker_title, marker_description, trip_date]
-      );
-  
-      res.status(201).json({
-        message: 'Marker bol úspešne vytvorený',
-        marker: result.rows[0]
-      });
-    } catch (error) {
-      console.error('Chyba pri vytváraní markeru:', error);
-      res.status(500).json({ error: 'Chyba na serveri' });
+
+  app.post('/markers', authenticateToken, async (req, res) => {
+      const { x_pos, y_pos, marker_title, marker_description, trip_date } = req.body;
+      const user_id = req.user.userId;  // Predpokladáme, že user_id je v decoded objekte
+
+      console.log(user_id);
+      try {
+          const result = await pool.query(
+              `INSERT INTO markers (user_id, x_pos, y_pos, marker_title, marker_description, trip_date)
+               VALUES ($1, $2, $3, $4, $5, $6)
+               RETURNING *`,
+              [user_id, x_pos, y_pos, marker_title, marker_description, trip_date]
+          );
+
+          res.status(201).json({
+              message: 'Marker bol úspešne vytvorený',
+              marker: result.rows[0]
+            });
+      } catch (error) {
+          console.error('Chyba pri vytváraní markeru:', error);
+          res.status(500).json({ error: 'Chyba na serveri' });
     }
   });
 

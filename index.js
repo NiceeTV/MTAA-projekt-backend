@@ -19,13 +19,14 @@ function authenticateToken(req, res, next) {
       return res.status(403).json({ message: 'Invalid or expired token' });
     }
 
+
     req.user = decoded; // uloženie používateľských informácií
     next(); // pokračovanie v spracovaní požiadavky
   });
 }
 
 
-require('./api_endpoints1')(app, pool);
+require('./api_endpoints1')(app, pool, authenticateToken);
 require('./api_endpoints2')(app, pool, authenticateToken);
 
 
