@@ -13,12 +13,12 @@
 - [✅] `POST /CreateMarker`
 
 ## 🧳 Tripy (jednodňové)
-- [ ] `POST /CreateTrip`
+- [✅] `POST /CreateTrip`
 - [✅] `DELETE /DeleteTrip`
 - [ ] `PUT /EditTrip`
-- [ ] `POST /UploadTripImages`
-- [ ] `GET /GetTripByID`
-- [ ] `GET /GetTripImages`
+- [✅] `POST /UploadTripImages`
+- [✅] `GET /GetTripByID`
+- [✅] `GET /GetTripImages`
 - [ ] `POST /ShareTrip` *(?)*
 - [✅] `GET /GetUserTrips`
 - [ ] `GET /GetUserTrips/sort`
