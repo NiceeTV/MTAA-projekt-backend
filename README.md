@@ -11,17 +11,20 @@
 - [✅] `GET /GetTripMarkers`
 - [✅] `GET /GetMarkerByID`
 - [✅] `POST /CreateMarker`
+- [ ] `PUT updateMarker`
 
 ## 🧳 Tripy (jednodňové)
 - [✅] `POST /CreateTrip`
 - [✅] `DELETE /DeleteTrip`
-- [ ] `PUT /EditTrip`
+- [✅] `PUT /EditTrip`
 - [✅] `POST /UploadTripImages`
 - [✅] `GET /GetTripByID`
 - [✅] `GET /GetTripImages`
+- [✅] `PUT EditTripImages`
 - [ ] `POST /ShareTrip` *(?)*
 - [✅] `GET /GetUserTrips`
 - [ ] `GET /GetUserTrips/sort`
+- [ ] `GET /GetSharedTrip`
 
 ## 🗓 Viacdňový trip
 - [ ] `POST /CreateMultiDayTrip`

@@ -117,7 +117,9 @@ CREATE TABLE friends (
 CREATE TABLE trip_images (
   trip_image_id SERIAL PRIMARY KEY,
   trip_id INT NOT NULL REFERENCES trip(trip_id) ON DELETE CASCADE,
-  image_url TEXT NOT NULL
+  image_url TEXT NOT NULL,
+  position INT NOT NULL,
+  UNIQUE(trip_id,position)
 );
 
 

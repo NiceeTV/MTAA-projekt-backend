@@ -32,47 +32,50 @@ module.exports = (app, pool, authenticateToken) => {
         const { user_id, image_type, trip_id } = req.params;
         const files = req.files;
 
-        if (!files || files.length === 0) { /* ak tam nie sú nahraté obrázky */
+        if (!files || files.length === 0) {
             return res.status(400).json({ error: 'Žiadne obrázky neboli nahrané' });
         }
 
         try {
-            /* či existuje user */
             const userStatus = await checkUserExists(user_id, res);
             if (userStatus) return userStatus;
 
             const imageUrls = [];
 
-            /* trip obrázky */
             if (image_type === 'trip_images') {
-                if (!trip_id) { /* ak som nezadal trip_id */
+                if (!trip_id) {
                     return res.status(400).json({ error: 'Chýba trip_id pre nahrávanie trip obrázkov' });
                 }
 
-                /* či existuje trip záznam */
                 const tripStatus = await checkTripExists(user_id, trip_id, res);
                 if (tripStatus) return tripStatus;
 
-                /* každý súbor sa uploadne */
-                for (const file of files) {
+                // Získaj najvyššiu existujúcu pozíciu v DB
+                const result = await pool.query(
+                    'SELECT MAX(position) AS max_pos FROM trip_images WHERE trip_id = $1',
+                    [trip_id]
+                );
+                let nextPos = (result.rows[0].max_pos ?? 0); // Ak neexistujú žiadne obrázky, začne sa od 0
+
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    const position = ++nextPos; // Priraď pozíciu a inkrementuj
                     const imagePath = `/images/${user_id}/trip_images/${trip_id}/${file.filename}`;
                     imageUrls.push(imagePath);
 
-                    /* vkladanie do databázy url obrázkov */
+                    // Ulož obrázok do databázy s pozíciou
                     await pool.query(
-                        'INSERT INTO trip_images (trip_id, image_url) VALUES ($1, $2)',
-                        [trip_id, imagePath]
+                        'INSERT INTO trip_images (trip_id, image_url, position) VALUES ($1, $2, $3)',
+                        [trip_id, imagePath, position]
                     );
                 }
             }
 
-            /* profilovka */
             else if (image_type === 'profile_images') {
-                const file = files[0]; // len jeden profilový obrázok
+                const file = files[0];
                 const newImagePath = `/images/${user_id}/profile_images/${file.filename}`;
                 imageUrls.push(newImagePath);
 
-                // Získaj pôvodný profilový obrázok z profile_picture tabuľky
                 const result = await pool.query(
                     'SELECT image_url FROM profile_picture WHERE user_id = $1',
                     [user_id]
@@ -80,7 +83,6 @@ module.exports = (app, pool, authenticateToken) => {
 
                 const oldImagePath = result.rows[0]?.image_url;
 
-                // Vymaž starý obrázok ak existuje a nie je null
                 if (oldImagePath) {
                     const fullOldPath = path.join(__dirname, oldImagePath);
                     if (fs.existsSync(fullOldPath)) {
@@ -90,20 +92,18 @@ module.exports = (app, pool, authenticateToken) => {
                         });
                     }
 
-                    // UPDATE existujúceho záznamu
                     await pool.query(
                         'UPDATE profile_picture SET image_url = $1 WHERE user_id = $2',
                         [newImagePath, user_id]
                     );
                 } else {
-                    // INSERT ak žiadny obrázok ešte neexistuje
                     await pool.query(
                         'INSERT INTO profile_picture (user_id, image_url) VALUES ($1, $2)',
                         [user_id, newImagePath]
                     );
                 }
             }
-            /* nesprávne napísaný image_type :) */
+
             else {
                 return res.status(400).json({ error: 'Neznámy typ obrázkov (image_type)' });
             }
@@ -226,6 +226,126 @@ module.exports = (app, pool, authenticateToken) => {
     });
 
 
+    /* edit trip, len to čo určím sa upraví */
+    app.put('/users/:id/trip/:trip_id', async (req, res) => {
+        const user_id = parseInt(req.params.id); // používame ID z URL
+        const trip_id = parseInt(req.params.trip_id); // ID výletu
+        const {
+            trip_title,
+            trip_description,
+            rating,
+            visibility,
+            start_date,
+            end_date
+        } = req.body;
+        const allowedVisibility = ['public', 'private', 'friends'];
+
+        if (visibility && !allowedVisibility.includes(visibility)) {
+            return res.status(400).json({ error: 'Neplatná hodnota pre visibility' });
+        }
+
+        try {
+            // Over kontrolu používateľa
+            const userCheck = await pool.query(
+                'SELECT id FROM users WHERE id = $1',
+                [user_id]
+            );
+
+            if (userCheck.rowCount === 0) {
+                return res.status(404).json({ error: 'Používateľ neexistuje' });
+            }
+
+
+            /* či existuje trip */
+            const tripResult = await pool.query('SELECT * FROM trip WHERE trip_id = $1', [trip_id]);
+            if (tripResult.rowCount === 0) {
+                return res.status(404).json({ error: 'Trip neexistuje' });
+            }
+
+
+            // Skladanie aktualizačného dotazu
+            let updateQuery = 'UPDATE trip SET';
+            const updateValues = [];
+            let valueIndex = 1;
+
+            if (trip_title) {
+                updateQuery += ` trip_title = $${valueIndex},`;
+                updateValues.push(trip_title);
+                valueIndex++;
+            }
+            if (trip_description) {
+                updateQuery += ` trip_description = $${valueIndex},`;
+                updateValues.push(trip_description);
+                valueIndex++;
+            }
+            if (rating) {
+                updateQuery += ` rating = $${valueIndex},`;
+                updateValues.push(rating);
+                valueIndex++;
+            }
+            if (visibility) {
+                updateQuery += ` visibility = $${valueIndex},`;
+                updateValues.push(visibility);
+                valueIndex++;
+            }
+            if (start_date) {
+                updateQuery += ` start_date = $${valueIndex},`;
+                updateValues.push(start_date);
+                valueIndex++;
+            }
+            if (end_date) {
+                updateQuery += ` end_date = $${valueIndex},`;
+                updateValues.push(end_date);
+                valueIndex++;
+            }
+
+            // Odstránenie poslednej zbytočnej čiarky
+            updateQuery = updateQuery.slice(0, -1); // odstráni poslednú čiarku
+            updateQuery += ' WHERE user_id = $' + valueIndex + ' AND trip_id = $' + (valueIndex + 1) + ' RETURNING *';
+
+            updateValues.push(user_id);
+            updateValues.push(trip_id);
+
+            // Spustenie dotazu na aktualizáciu
+            const result = await pool.query(updateQuery, updateValues);
+
+            res.status(200).json({
+                message: 'Výlet bol úspešne aktualizovaný',
+                trip: result.rows[0]
+            });
+        } catch (error) {
+            console.error('Chyba pri aktualizácii výletu:', error);
+            res.status(500).json({ error: 'Chyba na serveri' });
+        }
+    });
+
+
+    /* sort tripov usera */
+    app.get('/trip/:trip_id/sort', authenticateToken, async (req, res) => {
+        const { order } = req.query;
+        const user_id = req.user.user_id;
+
+        const sortOrder = (order === 'desc') ? 'DESC' : 'ASC'; // defaultne ASC
+
+        try {
+            const result = await pool.query(
+                `SELECT * FROM trip
+                   WHERE user_id = $1
+                   ORDER BY start_date ${sortOrder}`,
+                            [user_id]
+                        );
+
+            res.status(200).json({
+                message: `Výsledky zoradené podľa dátumu (${sortOrder})`,
+                trips: result.rows
+            });
+        } catch (err) {
+            console.error('Chyba pri získavaní výletov:', err);
+            res.status(500).json({ error: 'Chyba na serveri' });
+        }
+    });
+
+
 
     /* trip image management */
     /* nahranie profilovky */
@@ -242,21 +362,22 @@ module.exports = (app, pool, authenticateToken) => {
         try {
             const tripResult = await pool.query('SELECT * FROM trip WHERE trip_id = $1', [trip_id]);
 
+            /* či existuje trip */
             if (tripResult.rowCount === 0) {
                 return res.status(404).json({ error: 'Trip neexistuje' });
             }
 
-            // Získať obrázky pre daný trip
+            /* obrázky pre daný trip */
             const imagesResult = await pool.query('SELECT image_url FROM trip_images WHERE trip_id = $1', [trip_id]);
 
             if (imagesResult.rowCount === 0) {
                 return res.status(404).json({ error: 'Žiadne obrázky k tomuto tripu' });
             }
 
-            // Vytvoriť pole obrázkových URL
+            /* pole url obrázkov */
             const images = imagesResult.rows.map(row => row.image_url);
 
-            // Vrátiť obrázky
+            /* vráti obrázky */
             res.status(200).json({
                 message: 'Obrázky pre tento trip',
                 images: images
@@ -279,7 +400,6 @@ module.exports = (app, pool, authenticateToken) => {
     }
 
 
-
     /* získanie jedného trip image obrázka z backendu cez url */
     app.get('/images/:user_id/trip_images/:trip_id/:filename', async (req, res) => {
         const { user_id, trip_id, filename } = req.params;
@@ -294,6 +414,110 @@ module.exports = (app, pool, authenticateToken) => {
         const imagePath = path.join(__dirname, 'images', user_id, 'profile_images', filename);
         return sendImage(res, imagePath);
     });
+
+
+    /* edit trip obrázkov */
+    /* funguje na báze imagesToAdd a imagesToDelete, z frontendu mi príde čo mám vymazať a čo pridať */
+    app.put('/trip/:user_id/trip_images/:trip_id', upload.array('imagesToAdd'), async (req, res) => {
+        const { user_id, trip_id } = req.params;
+        const { imagesToDelete } = req.body; // JSON stringified array from frontend
+        const files = req.files;
+
+        const replacedImages = [];
+
+        try {
+            // Kontrola či existuje user a trip
+            const userStatus = await checkUserExists(user_id, res);
+            if (userStatus) return userStatus;
+
+            const tripStatus = await checkTripExists(user_id, trip_id, res);
+            if (tripStatus) return tripStatus;
+
+            // Spracovanie vymazania obrázkov
+            const toDelete = JSON.parse(imagesToDelete || '[]'); // frontend pošle JSON.stringify([...])
+
+
+            // Získaj najvyššiu existujúcu pozíciu v DB
+            const result = await pool.query(
+                'SELECT MAX(position) AS max_pos FROM trip_images WHERE trip_id = $1',
+                [trip_id]
+            );
+            let nextPos = (result.rows[0].max_pos ?? 0); // Ak neexistujú žiadne obrázky, začne sa od 0
+
+
+
+            for (const position of toDelete) {
+                const result = await pool.query(
+                    'SELECT image_url FROM trip_images WHERE trip_id = $1 AND position = $2',
+                    [trip_id, position]
+                );
+
+
+                if (result.rows.length > 0) {
+                    const imageUrl = result.rows[0].image_url;
+                    const fullPath = path.join(__dirname, imageUrl);
+
+
+                    if (fs.existsSync(fullPath)) {
+                        fs.unlinkSync(fullPath); // Vymažeme súbor z disku
+                    }
+
+                    await pool.query(
+                        'DELETE FROM trip_images WHERE trip_id = $1 AND position = $2',
+                        [trip_id, position]
+                    );
+
+                    replacedImages.push(imageUrl);
+                }
+            }
+
+            // Spracovanie pridania nových obrázkov
+            const imageUrls = [];
+
+
+
+            let pos;
+            for (const [index, file] of files.entries()) {
+                const imagePath = `/images/${user_id}/trip_images/${trip_id}/${file.filename}`;
+                imageUrls.push(imagePath);
+
+                if (typeof toDelete[index] === 'number') {
+                    pos = toDelete[index];
+                }
+                else {
+                    pos = ++nextPos;
+                }
+
+                await pool.query(
+                    'INSERT INTO trip_images (trip_id, image_url, position) VALUES ($1, $2, $3)',
+                    [trip_id, imagePath, pos]
+                );
+
+            }
+
+
+            res.status(200).json({
+                message: 'Obrázky boli aktualizované',
+                addedImages: imageUrls,
+                deletedImages: replacedImages
+            });
+
+        } catch (err) {
+            console.error('Chyba pri aktualizácii obrázkov:', err);
+            res.status(500).json({ error: 'Chyba na serveri' });
+        }
+    });
+
+
+    /* situácie k update obrázkom */
+    /*
+        1. chcem nahradiť obrázok s position 1:1 - ✅
+        2. chcem len pridať obrázok naviac okrem tých - ✅
+        3. chcem len vymazať obrázok - ✅
+        4. nahradiť obrázky aj pridať - ✅
+     */
+
+
 
 
 
@@ -324,11 +548,4 @@ module.exports = (app, pool, authenticateToken) => {
             res.status(500).json({ error: 'Chyba na serveri' });
         }
     });
-
-
-
-
-
-
-
 }

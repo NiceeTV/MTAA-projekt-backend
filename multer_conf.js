@@ -33,7 +33,10 @@ const storage = multer.diskStorage({
     }
 });
 
+
+
 //inicializácia multer
 const upload = multer({ storage });
+
 
 module.exports = upload;
