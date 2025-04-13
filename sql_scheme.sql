@@ -1,7 +1,7 @@
 -- definované typy
 CREATE TYPE visibility_level AS ENUM ('public', 'friends', 'private');
 CREATE TYPE message_type AS ENUM ('trip_share', 'friend_request');
-CREATE TYPE friendship_status AS ENUM ('pending', 'accepted', 'blocked');
+CREATE TYPE friendship_status AS ENUM ('pending', 'accepted', 'declined');
 
 
 

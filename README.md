@@ -27,16 +27,18 @@
 - [✅] `GET /GetSharedTrip`
 
 ## 🗓 Viacdňový trip
-- [ ] `POST /CreateMultiDayTrip`
-- [ ] `GET /GetMultiDayTrip`
+- [✅] `POST /CreateMultiDayTrip`
+- [✅] `GET /GetMultiDayTrip`
 
 ## 👥 Používateľ
 - [✅] `POST /Login`
 - [✅] `POST /Register`
 - [✅] `GET /GetUsers` – na vyhľadanie priateľov
 - [✅] `GET /GetUser` alebo `/GetProfile`
-- [ ] `GET /GetUserFriends`
-- [ ] `PUT /friendshipResponse`
+- [✅] `GET /GetUserFriends`
+- [✅] `POST /sendFriendRequest`
+- [✅] `PUT /friendshipResponse`
+- [✅] `DELETE /deleteFriend`
 
 ## 📊 Štatistiky
 - [✅] `GET /GetStatistics`

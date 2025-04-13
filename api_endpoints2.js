@@ -121,11 +121,11 @@ module.exports = (app, pool, authenticateToken) => {
 
 
     /* Pomocná funkcia na poslanie notifikácie */
-    async function sendNotification(sender_id, target_id, trip_id) {
+    async function sendNotification(sender_id, target_id, trip_id = null, type = 'trip_share') {
         try {
             await pool.query(
                 'INSERT INTO notifications (sender_id, target_id, trip_id, type) VALUES ($1, $2, $3, $4)',
-                [sender_id, target_id, trip_id, 'trip_share']
+                [sender_id, target_id, trip_id, type]
             );
         } catch (error) {
             console.error('Chyba pri vytváraní notifikácie:', error);
@@ -674,5 +674,293 @@ module.exports = (app, pool, authenticateToken) => {
             res.status(500).json({ error: 'Chyba na serveri' });
         }
     });
+
+
+
+
+    /*** friends ***/
+    /* getUserFriends */
+    app.get('/GetUserFriends', authenticateToken, async (req, res) => {
+        const user_id = req.user.userId;
+
+        console.log(user_id);
+        try {
+            const friendsResult = await pool.query(
+                `
+            SELECT u.id, u.username, u.email
+            FROM friends f
+            JOIN users u ON (
+                (u.id = f.friend_id AND f.user_id = $1) OR
+                (u.id = f.user_id AND f.friend_id = $1)
+            )
+            WHERE f.status = 'accepted'
+              AND u.id != $1
+            `,
+                [user_id]
+            );
+
+            res.status(200).json({
+                friends: friendsResult.rows
+            });
+        } catch (err) {
+            console.error('Chyba pri získavaní priateľov:', err);
+            res.status(500).json({ error: 'Chyba na serveri' });
+        }
+    });
+
+
+    /* send friend request */
+    app.post('/sendFriendRequest', authenticateToken, async (req, res) => {
+        const sender_id = req.user.userId;
+        const { target_user_id } = req.body;
+
+        if (sender_id === target_user_id) {
+            return res.status(400).json({ error: 'Nemôžete si poslať žiadosť o priateľstvo sám sebe.' });
+        }
+
+        try {
+            /* či existuje target */
+            const userCheck = await pool.query('SELECT id FROM users WHERE id = $1', [target_user_id]);
+            if (userCheck.rowCount === 0) {
+                return res.status(404).json({ error: 'Cieľový používateľ neexistuje.' });
+            }
+
+            /* či nie je o nich nejaký záznam už */
+            const existing = await pool.query(
+                `
+                SELECT * FROM friends 
+                WHERE (user_id = $1 AND friend_id = $2)
+                   OR (user_id = $2 AND friend_id = $1)
+                `,
+                [sender_id, target_user_id]
+            );
+
+            if (existing.rowCount > 0) {
+                return res.status(400).json({ error: 'Žiadosť už existuje alebo ste už priatelia.' });
+            }
+
+            /* vytvor žiadosť */
+            await pool.query(
+                `
+                INSERT INTO friends (user_id, friend_id, status)
+                VALUES ($1, $2, 'pending')
+                `,
+                [sender_id, target_user_id]
+            );
+
+            await sendNotification(sender_id, target_user_id, null, 'friend_request'); /* pošli notifikáciu */
+            res.status(200).json({ message: 'Žiadosť o priateľstvo bola odoslaná.' });
+        } catch (err) {
+            console.error('Chyba pri odosielaní žiadosti o priateľstvo:', err);
+            res.status(500).json({ error: 'Chyba na serveri.' });
+        }
+    });
+
+
+    /* prijať priateľstvo */
+    app.put('/friendshipResponse', authenticateToken, async (req, res) => {
+        const user_id = req.user.userId;
+        const { sender_id, action } = req.body; // action: 'accept' alebo 'decline'
+
+
+        /* či je správna odpoveď v requeste */
+        const validActions = ['accept', 'decline'];
+        if (!validActions.includes(action)) {
+            return res.status(400).json({ error: 'Neplatná akcia. Použi "accept" alebo "decline".' });
+        }
+
+        try {
+            /* či je nejaká žiadosť pending medzi nimi */
+            const existing = await pool.query(
+                `
+                SELECT * FROM friends
+                WHERE (user_id = $1 AND friend_id = $2)
+                   OR (user_id = $2 AND friend_id = $1)
+                `,
+                [sender_id, user_id]
+            );
+
+
+            /* ktorý záznam vo friends to je */
+            let friendshipToUpdate;
+            if (existing.rowCount > 0) {
+                friendshipToUpdate = existing.rows[0].friendship_id;
+            }
+
+
+            if (sender_id === user_id) { /* nemôžem prijať vlastnú žiadosť */
+                return res.status(401).json({ error: 'Nie si cieľom tejto žiadosti o priateľstvo.' });
+            }
+
+            /* friendship status */
+            let statusToUpdate = action === 'accept' ? 'accepted' : 'declined';
+
+            /* aktualizuj status priatelstva */
+            await pool.query(
+                `UPDATE friends SET status = $1 WHERE friendship_id = $2`,
+                [statusToUpdate, friendshipToUpdate]
+            );
+
+            res.status(200).json({ message: `Žiadosť o priateľstvo bola ${statusToUpdate === 'accepted' ? 'prijatá' : 'odmietnutá'}.` });
+
+        } catch (error) {
+            console.error('Chyba pri spracovaní žiadosti o priateľstvo:', error);
+            res.status(500).json({ error: 'Chyba na serveri' });
+        }
+    });
+
+
+    /* delete friend */
+    app.delete('/deleteFriend', authenticateToken, async (req, res) => {
+        const user_id = req.user.userId;
+        const { friend_to_delete_id } = req.body; // Identifikátory používateľov
+        try {
+
+            /* či sú priatelia */
+            const existing = await pool.query(
+                `
+                SELECT * FROM friends
+                WHERE (user_id = $1 AND friend_id = $2)
+                   OR (user_id = $2 AND friend_id = $1)
+                `,
+                [friend_to_delete_id, user_id]
+            );
+
+            /* ak neexistuje, tak chyba */
+            if (existing.rowCount === 0) {
+                return res.status(404).json({ error: 'Priateľstvo neexistuje' });
+            }
+
+            /* vymaž priatelstvo */
+            await pool.query(
+                `
+                DELETE FROM friends
+                WHERE friendship_id = $1
+                `,
+                [existing.rows[0].friendship_id]
+            );
+
+            /* keď sa podarí */
+            res.status(200).json({ message: 'Priateľstvo bolo úspešne odstránené.' });
+        } catch (error) {
+            console.error('Chyba pri odstraňovaní priateľstva:', error);
+            res.status(500).json({ error: 'Chyba na serveri' });
+        }
+    });
+
+
+
+    /** multi day tripy **/
+    app.post('/CreateMultiDayTrip', authenticateToken, async (req, res) => {
+        const user_id = req.user.userId;
+        const { title, description, trip_ids } = req.body;  /* trip id ktoré tam chcem pridať */
+
+        try {
+            /* či existuje user */
+            const userCheck = await pool.query('SELECT id FROM users WHERE id = $1', [user_id]);
+            if (userCheck.rowCount === 0) {
+                return res.status(404).json({ error: 'Používateľ neexistuje' });
+            }
+
+            /* zoberiem tripy podľa trip_id z trip_ids */
+            const tripResult = await pool.query(
+                `SELECT trip_id, start_date, end_date
+                 FROM trip
+                 WHERE trip_id = ANY($1)
+                 ORDER BY start_date`, [trip_ids]
+            );
+
+            if (tripResult.rowCount === 0) {
+                return res.status(404).json({ error: 'Vybrané tripy neexistujú' });
+            }
+
+
+            /* start_date z prvého tripu a end_date z posledného tripu */
+            const trips = tripResult.rows;
+            const start_date = trips[0].start_date;  /* prvý trip */
+            const end_date = trips[trips.length - 1].end_date;  /* posledný trip */
+
+
+            /* zapíšeme multi day trip do db */
+            const result = await pool.query(
+                `INSERT INTO multi_day_trip (user_id, title, description, start_date, end_date)
+                 VALUES ($1, $2, $3, $4, $5)
+                 RETURNING multi_day_trip_id`,
+                [user_id, title, description, start_date, end_date]
+            );
+
+            const multi_day_trip_id = result.rows[0].multi_day_trip_id;
+
+            /* Priradíme tripy do multi-day tripu so správnym poradením */
+            let trip_order = 1;  // Začneme od 1 pre poradie tripov
+            for (const trip of trips) {
+                await pool.query(
+                    `INSERT INTO multi_day_trip_trip (multi_day_trip_id, trip_id, trip_order)
+                    VALUES ($1, $2, $3)`,
+                    [multi_day_trip_id, trip.trip_id, trip_order]
+                );
+                trip_order++;  // Inkrementujeme poradie pre každý trip
+            }
+
+            res.status(200).json({
+                message: 'Multi-day trip bol úspešne vytvorený',
+                multi_day_trip_id,
+                title,
+                start_date,
+                end_date
+            });
+        } catch (error) {
+            console.error('Chyba pri vytváraní multi-day tripu:', error);
+            res.status(500).json({ error: 'Chyba na serveri' });
+        }
+    });
+
+
+    /* get multi day trip */
+    app.get('/multiDayTrip/:id', authenticateToken, async (req, res) => {
+        const user_id = req.user.userId;
+        const multi_day_trip_id = parseInt(req.params.id);
+
+        try {
+            /* multi day trip podla id */
+            const tripResult = await pool.query(
+                `SELECT title, description, start_date, end_date
+                 FROM multi_day_trip
+                 WHERE multi_day_trip_id = $1 AND user_id = $2`,
+                [multi_day_trip_id, user_id]
+            );
+
+            if (tripResult.rowCount === 0) {
+                return res.status(404).json({ error: 'Multi-day trip neexistuje alebo nepatrí tomuto používateľovi.' });
+            }
+
+            const trip = tripResult.rows[0];
+
+            // Získaj trip_ids a ich poradie
+            const subTrips = await pool.query(
+                `SELECT trip_id, trip_order
+                 FROM multi_day_trip_trip
+                 WHERE multi_day_trip_id = $1
+                 ORDER BY trip_order`,
+                [multi_day_trip_id]
+            );
+
+            res.status(200).json({
+                title: trip.title,
+                description: trip.description,
+                start_date: trip.start_date,
+                end_date: trip.end_date,
+                trip_ids: subTrips.rows.map(t => ({
+                    trip_id: t.trip_id,
+                    order: t.trip_order
+                }))
+            });
+
+        } catch (error) {
+            console.error('Chyba pri načítaní multi-day tripu:', error);
+            res.status(500).json({ error: 'Chyba na serveri' });
+        }
+    });
+
 
 }

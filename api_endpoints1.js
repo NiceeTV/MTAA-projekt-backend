@@ -1,5 +1,6 @@
 module.exports = (app, pool, authenticateToken) => {
-
+    /*** ENDPOINTY ***/
+    /* vymaž usera podla id  */
     app.delete('/users/:id', async (req, res) => {
         const { id } = req.params;
 
@@ -18,9 +19,10 @@ module.exports = (app, pool, authenticateToken) => {
         }
     });
 
+
+    /* get usera podla id */
     app.get('/users/:id', async (req, res) => {
         const { id } = req.params;
-        console.log(`ID: ${id}`); // Pridaj logovanie ID
 
         try {
             const result = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
@@ -36,6 +38,8 @@ module.exports = (app, pool, authenticateToken) => {
         }
     });
 
+
+    /* všetci useri */
     app.get('/users', async (req, res) => {
         try {
             const result = await pool.query('SELECT * FROM users');
@@ -46,6 +50,8 @@ module.exports = (app, pool, authenticateToken) => {
         }
     });
 
+
+    /* pridaj user trip*/
     app.post('/users/:id/trip', async (req, res) => {
         const user_id = parseInt(req.params.id); // používame ID z URL
         const {
@@ -96,8 +102,13 @@ module.exports = (app, pool, authenticateToken) => {
         }
       });
 
-      app.get('/users/:id/trip', async (req, res) => {
-        const user_id = parseInt(req.params.id);
+
+      /* get user trips */
+      app.get('/users/:id/trip', authenticateToken, async (req, res) => {
+        let user_id = parseInt(req.params.id);
+        if (!user_id) {
+            user_id = req.user.userId;
+        }
       
         try {
           const result = await pool.query(
@@ -112,8 +123,9 @@ module.exports = (app, pool, authenticateToken) => {
         }
       });
 
-    // Odstránenie výletu pre používateľa
-    app.delete('/users/:id/trip/:trip_id', async (req, res) => {
+
+    /* odstrani trip pre usera podla trip_id */
+    app.delete('/users/:id/trip/:trip_id', authenticateToken, async (req, res) => {
     const user_id = parseInt(req.params.id); // Získanie user_id z URL parametra
     const trip_id = parseInt(req.params.trip_id); // Získanie trip_id z URL parametra
   
@@ -141,11 +153,12 @@ module.exports = (app, pool, authenticateToken) => {
     }
   });
 
+
+  /* vytvor marker */
   app.post('/markers', authenticateToken, async (req, res) => {
       const { x_pos, y_pos, marker_title, marker_description, trip_date } = req.body;
       const user_id = req.user.userId;  // Predpokladáme, že user_id je v decoded objekte
 
-      console.log(user_id);
       try {
           const result = await pool.query(
               `INSERT INTO markers (user_id, x_pos, y_pos, marker_title, marker_description, trip_date)
@@ -164,33 +177,51 @@ module.exports = (app, pool, authenticateToken) => {
     }
   });
 
-  app.get('/markers/:trip_id', async (req, res) => {
-    const trip_id = parseInt(req.params.trip_id);
-  
-    try {
-      const result = await pool.query(
-        'SELECT * FROM markers WHERE trip_id = $1',
-        [trip_id]
-      );
-  
-      res.status(200).json(result.rows);
-    } catch (error) {
-      console.error('Chyba pri načítaní markerov:', error);
-      res.status(500).json({ error: 'Chyba na serveri' });
-    }
+
+  /* get marker podla marker id */
+  app.get('/markers/:trip_id', authenticateToken, async (req, res) => {
+      const trip_id = parseInt(req.params.trip_id);
+      const user_id = req.user.user_id; // alebo userId ak si to tak používal
+
+      try {
+          const result = await pool.query(
+            `
+            SELECT m.*
+            FROM markers m
+            JOIN trip_markers tm ON tm.marker_id = m.marker_id
+            WHERE tm.trip_id = $1 AND m.user_id = $2
+            `,
+                [trip_id, user_id]
+            );
+
+
+            if (result.rowCount === 0) {
+                return res.status(201).json({ error: 'Tento výlet nemá žiadne markery.' });
+            }
+
+            res.status(200).json(result.rows);
+
+
+        } catch (error) {
+            console.error('Chyba pri načítaní markerov:', error);
+            res.status(500).json({ error: 'Chyba na serveri' });
+        }
   });
 
-  app.delete('/markers/:marker_id', async (req, res) => {
+
+  /* vymaz marker podla id */
+  app.delete('/markers/:marker_id', authenticateToken, async (req, res) => {
     const marker_id = parseInt(req.params.marker_id);
-  
+    const user_id = req.user.userId;
+
     try {
       const result = await pool.query(
-        'DELETE FROM markers WHERE marker_id = $1 RETURNING *',
-        [marker_id]
+        'DELETE FROM markers WHERE marker_id = $1 AND user_id = $2 RETURNING *',
+        [marker_id, user_id]
       );
   
       if (result.rowCount === 0) {
-        return res.status(404).json({ error: 'Marker neexistuje' });
+        return res.status(404).json({ error: 'Marker neexistuje alebo nepatrí používateľovi.' });
       }
   
       res.status(200).json({
@@ -203,51 +234,8 @@ module.exports = (app, pool, authenticateToken) => {
     }
   });
 
-  app.post('/notifications', async (req, res) => {
-    const { sender_id, target_id, type } = req.body;
-  
-    // Overenie, že sender a target sú rôzni
-    if (sender_id === target_id) {
-      return res.status(400).json({ error: 'Odosielateľ a príjemca musia byť rôzni.' });
-    }
-  
-    try {
-      // Overenie, že sender existuje
-      const senderCheck = await pool.query(
-        'SELECT id FROM users WHERE id = $1',
-        [sender_id]
-      );
-      if (senderCheck.rowCount === 0) {
-        return res.status(404).json({ error: 'Odosielateľ neexistuje.' });
-      }
-  
-      // Overenie, že target existuje
-      const targetCheck = await pool.query(
-        'SELECT id FROM users WHERE id = $1',
-        [target_id]
-      );
-      if (targetCheck.rowCount === 0) {
-        return res.status(404).json({ error: 'Príjemca neexistuje.' });
-      }
-  
-      // Vloženie notifikácie do databázy
-      const result = await pool.query(
-        `INSERT INTO notifications (sender_id, target_id, type)
-         VALUES ($1, $2, $3)
-         RETURNING *;`,
-        [sender_id, target_id, type]
-      );
-  
-      res.status(201).json({
-        message: 'Notifikácia bola úspešne vytvorená.',
-        notification: result.rows[0]
-      });
-    } catch (error) {
-      console.error('Chyba pri vytváraní notifikácie:', error);
-      res.status(500).json({ error: 'Chyba na serveri pri vytváraní notifikácie.' });
-    }
-  });
 
+  /* získaj všetky notifikácie usera */
   app.get('/notifications', authenticateToken, async (req, res) => {
     const user_id = req.user.userId;
 
@@ -263,7 +251,8 @@ module.exports = (app, pool, authenticateToken) => {
   });
 
 
-  app.get('users/:user_id/statistics', async (req, res) => {
+  /* získaj štatistiku usera */
+  app.get('users/:user_id/statistics', authenticateToken, async (req, res) => {
     const user_id = parseInt(req.params.user_id);
   
     try {
