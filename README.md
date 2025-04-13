@@ -4,13 +4,13 @@
 
 ## 🔔 Notifikácie
 - [✅] `GET /GetNotifications`
-- [✅] `POST /CreateNotification` – Pridám si priateľa, zdieľam trip
 
 ## 🧭 Markery
 - [✅] `GET /GetMarkers` – všetky
 - [✅] `GET /GetTripMarkers`
-- [✅] `GET /GetMarkerByID`
+- [✅] `GET /GetMarkerByMarkerID`
 - [✅] `POST /CreateMarker`
+- [✅] `POST /assignMarkersToTrip`
 - [✅] `PUT updateMarker`
 
 ## 🧳 Tripy (jednodňové)

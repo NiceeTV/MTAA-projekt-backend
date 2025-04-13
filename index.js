@@ -33,7 +33,7 @@ require('./api_endpoints2')(app, pool, authenticateToken);
 
 
 const PORT = 3000;
-const hostname = '192.168.0.105';
+const hostname = 'localhost';
 app.listen(PORT, hostname, () => {
   console.log(`Server beží na ${hostname}:${PORT}`);
 });

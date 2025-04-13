@@ -178,10 +178,10 @@ module.exports = (app, pool, authenticateToken) => {
   });
 
 
-  /* get marker podla marker id */
+  /* get marker podla trip id */
   app.get('/markers/:trip_id', authenticateToken, async (req, res) => {
       const trip_id = parseInt(req.params.trip_id);
-      const user_id = req.user.user_id; // alebo userId ak si to tak používal
+      const user_id = req.user.userId; // alebo userId ak si to tak používal
 
       try {
           const result = await pool.query(
@@ -196,7 +196,7 @@ module.exports = (app, pool, authenticateToken) => {
 
 
             if (result.rowCount === 0) {
-                return res.status(201).json({ error: 'Tento výlet nemá žiadne markery.' });
+                return res.status(404).json({ error: 'Tento výlet nemá žiadne markery alebo neexistuje.' });
             }
 
             res.status(200).json(result.rows);
@@ -207,6 +207,29 @@ module.exports = (app, pool, authenticateToken) => {
             res.status(500).json({ error: 'Chyba na serveri' });
         }
   });
+
+
+    /* get marker by marker_id */
+    app.get('/markers/getMarkerByMarkerID/:marker_id', authenticateToken, async (req, res) => {
+        const marker_id = parseInt(req.params.marker_id);
+        const user_id = req.user.userId;
+
+        try {
+            const result = await pool.query(
+                'SELECT * FROM markers WHERE marker_id = $1 AND user_id = $2',
+                [marker_id, user_id]
+            );
+
+            if (result.rowCount === 0) {
+                return res.status(404).json({ error: 'Marker neexistuje alebo nepatrí používateľovi.' });
+            }
+
+            res.status(200).json(result.rows[0]);
+        } catch (error) {
+            console.error('Chyba pri načítavaní markeru:', error);
+            res.status(500).json({ error: 'Chyba na serveri' });
+        }
+    });
 
 
   /* vymaz marker podla id */
@@ -243,7 +266,15 @@ module.exports = (app, pool, authenticateToken) => {
       const result = await pool.query(
         'SELECT * FROM notifications where target_id = $1 ORDER BY created_at DESC', [user_id]
       );
-      res.status(200).json(result.rows);
+
+      if (result.rowCount === 0) {
+          res.status(201).json({ message: 'Tento používateľ nemá žiadne notifikácie.' });
+      }
+      else {
+          res.status(200).json(result.rows);
+      }
+
+
     } catch (error) {
       console.error('Chyba pri načítavaní notifikácií:', error);
       res.status(500).json({ error: 'Chyba na serveri pri načítavaní notifikácií.' });
@@ -252,8 +283,13 @@ module.exports = (app, pool, authenticateToken) => {
 
 
   /* získaj štatistiku usera */
-  app.get('users/:user_id/statistics', authenticateToken, async (req, res) => {
-    const user_id = parseInt(req.params.user_id);
+  app.get('/users/:user_id/statistics', authenticateToken, async (req, res) => {
+    let user_id = parseInt(req.params.user_id);
+
+
+    if (!user_id) {
+        user_id = req.user.userId;
+    }
   
     try {
       const result = await pool.query(

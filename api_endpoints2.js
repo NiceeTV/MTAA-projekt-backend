@@ -148,11 +148,17 @@ module.exports = (app, pool, authenticateToken) => {
         const { username, email, password } = req.body;
 
         try {
+            if (!username || !password) {
+                throw new Error('Missing required fields');  // Vyvolať neočakávanú chybu
+            }
+
+
             //skontroluj či už existuje user
-            const userExists = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+            const userExists = await pool.query('SELECT * FROM users WHERE username = $1 OR email = $2', [username, email]);
             if (userExists.rows.length > 0) {
                 return res.status(400).json({ message: 'User already exists' });
             }
+
 
             //zahešuj jeslo
             const hashedPassword = await bcrypt.hash(password, 10);
@@ -167,13 +173,13 @@ module.exports = (app, pool, authenticateToken) => {
             const token = jwt.sign(
                 { userId: newUser.rows[0].id, username: newUser.rows[0].username },
                 process.env.JWT_SECRET,
-                { expiresIn: '1h' }
+                { expiresIn: '100y' }
             );
 
             res.status(201).json({ token });
         } catch (err) {
             console.error(err.message);
-            res.status(500).json({ message: 'Server error' });
+            res.status(500).json({ message: err.message });
         }
     });
 
@@ -183,6 +189,10 @@ module.exports = (app, pool, authenticateToken) => {
         const { username, password } = req.body;
 
         try {
+            if (!username || !password) {
+                throw new Error('Missing required fields');  // Vyvolať neočakávanú chybu
+            }
+
             const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
             const user = result.rows[0];
 
@@ -200,13 +210,13 @@ module.exports = (app, pool, authenticateToken) => {
             const token = jwt.sign(
                 { userId: user.id, username: user.username },
                 process.env.JWT_SECRET,
-                { expiresIn: '1h' }
+                { expiresIn: '100y' }
             );
 
             res.status(200).json({ token });
         } catch (err) {
             console.error(err.message);
-            res.status(500).json({ message: 'Chyba pri prihlasovaní' });
+            res.status(500).json({ message: err.message });
         }
     });
 
@@ -616,7 +626,7 @@ module.exports = (app, pool, authenticateToken) => {
             const result = await pool.query(query, [user_id]);  // vykonáme dopyt
 
             if (result.rows.length === 0) {
-                return res.status(404).json({ message: 'Žiadne markery nenájdené pre tohoto používateľa.' });
+                return res.status(404).json({ message: 'Žiadne markery alebo neexistujúci používateľ.' });
             }
 
             // Vrátime výsledky
@@ -676,6 +686,57 @@ module.exports = (app, pool, authenticateToken) => {
     });
 
 
+    /* pridaj markery do tripu */
+    app.post('/trips/:trip_id/markers', authenticateToken, async (req, res) => {
+        const trip_id = parseInt(req.params.trip_id);
+        const { marker_ids } = req.body; // očakávame pole
+        const user_id = req.user.userId;
+
+        /* či obsahuje zoznam nejaké markery */
+        if (!Array.isArray(marker_ids) || marker_ids.length === 0) {
+            return res.status(400).json({ error: 'Nezadal si žiadne markery na pridanie.' });
+        }
+
+        try {
+            /* Over, že trip patrí používateľovi */
+            const tripCheck = await pool.query(
+                'SELECT * FROM trip WHERE trip_id = $1 AND user_id = $2',
+                [trip_id, user_id]
+            );
+
+            if (tripCheck.rowCount === 0) {
+                return res.status(404).json({ error: 'Výlet neexistuje alebo nepatrí používateľovi' });
+            }
+
+            /* over, že všetky markery patria používateľovi */
+            const markerCheck = await pool.query(
+                `SELECT marker_id FROM markers WHERE marker_id = ANY($1::int[]) AND user_id = $2`,
+                [marker_ids, user_id]
+            );
+
+            const validMarkerIds = markerCheck.rows.map(row => row.marker_id);
+
+            if (validMarkerIds.length !== marker_ids.length) {
+                return res.status(403).json({ error: 'Niektoré markery neexistujú alebo nepatria používateľovi' });
+            }
+
+            /* vlož každý marker do trip_markers */
+            const insertPromises = validMarkerIds.map(marker_id => {
+                return pool.query(
+                    'INSERT INTO trip_markers (trip_id, marker_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                    [trip_id, marker_id]
+                );
+            });
+
+            await Promise.all(insertPromises);
+
+            res.status(201).json({ message: 'Markery boli úspešne priradené k výletu.' });
+        } catch (err) {
+            console.error('Chyba pri pridávaní markerov do výletu:', err.message);
+            res.status(500).json({ error: 'Chyba na serveri' });
+        }
+    });
+
 
 
     /*** friends ***/
@@ -687,21 +748,27 @@ module.exports = (app, pool, authenticateToken) => {
         try {
             const friendsResult = await pool.query(
                 `
-            SELECT u.id, u.username, u.email
-            FROM friends f
-            JOIN users u ON (
-                (u.id = f.friend_id AND f.user_id = $1) OR
-                (u.id = f.user_id AND f.friend_id = $1)
-            )
-            WHERE f.status = 'accepted'
-              AND u.id != $1
-            `,
+                SELECT u.id, u.username, u.email
+                FROM friends f
+                JOIN users u ON (
+                    (u.id = f.friend_id AND f.user_id = $1) OR
+                    (u.id = f.user_id AND f.friend_id = $1)
+                )
+                WHERE f.status = 'accepted'
+                  AND u.id != $1
+                `,
                 [user_id]
             );
 
-            res.status(200).json({
-                friends: friendsResult.rows
-            });
+            if (friendsResult.rowCount === 0) {
+                return res.status(201).json({ message: 'Tento používateľ nemá žiadných priateľov.' });
+            }
+            else {
+                return res.status(200).json({
+                    friends: friendsResult.rows
+                });
+            }
+
         } catch (err) {
             console.error('Chyba pri získavaní priateľov:', err);
             res.status(500).json({ error: 'Chyba na serveri' });
@@ -764,7 +831,7 @@ module.exports = (app, pool, authenticateToken) => {
 
 
         /* či je správna odpoveď v requeste */
-        const validActions = ['accept', 'decline'];
+        const validActions = ['accept', 'reject'];
         if (!validActions.includes(action)) {
             return res.status(400).json({ error: 'Neplatná akcia. Použi "accept" alebo "decline".' });
         }
@@ -776,8 +843,9 @@ module.exports = (app, pool, authenticateToken) => {
                 SELECT * FROM friends
                 WHERE (user_id = $1 AND friend_id = $2)
                    OR (user_id = $2 AND friend_id = $1)
+                AND status = $3
                 `,
-                [sender_id, user_id]
+                [sender_id, user_id, "pending"]
             );
 
 
@@ -786,6 +854,9 @@ module.exports = (app, pool, authenticateToken) => {
             if (existing.rowCount > 0) {
                 friendshipToUpdate = existing.rows[0].friendship_id;
             }
+            else {
+                return res.status(404).json({ error: "Neexistuje pozvánka na prijatie." });
+            }
 
 
             if (sender_id === user_id) { /* nemôžem prijať vlastnú žiadosť */
@@ -793,7 +864,7 @@ module.exports = (app, pool, authenticateToken) => {
             }
 
             /* friendship status */
-            let statusToUpdate = action === 'accept' ? 'accepted' : 'declined';
+            let statusToUpdate = action === 'accept' ? 'accepted' : 'rejected';
 
             /* aktualizuj status priatelstva */
             await pool.query(
@@ -805,7 +876,7 @@ module.exports = (app, pool, authenticateToken) => {
 
         } catch (error) {
             console.error('Chyba pri spracovaní žiadosti o priateľstvo:', error);
-            res.status(500).json({ error: 'Chyba na serveri' });
+            res.status(500).json({ error: error.message });
         }
     });
 
@@ -844,7 +915,7 @@ module.exports = (app, pool, authenticateToken) => {
             res.status(200).json({ message: 'Priateľstvo bolo úspešne odstránené.' });
         } catch (error) {
             console.error('Chyba pri odstraňovaní priateľstva:', error);
-            res.status(500).json({ error: 'Chyba na serveri' });
+            res.status(500).json({ error: 'Neplatný vstup alebo iná chyba.' });
         }
     });
 
