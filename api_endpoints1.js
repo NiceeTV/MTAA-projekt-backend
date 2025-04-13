@@ -112,8 +112,8 @@ module.exports = (app, pool, authenticateToken) => {
         }
       });
 
-      // Odstránenie výletu pre používateľa
-app.delete('/users/:id/trip/:trip_id', async (req, res) => {
+    // Odstránenie výletu pre používateľa
+    app.delete('/users/:id/trip/:trip_id', async (req, res) => {
     const user_id = parseInt(req.params.id); // Získanie user_id z URL parametra
     const trip_id = parseInt(req.params.trip_id); // Získanie trip_id z URL parametra
   
@@ -248,10 +248,12 @@ app.delete('/users/:id/trip/:trip_id', async (req, res) => {
     }
   });
 
-  app.get('/notifications', async (req, res) => {
+  app.get('/notifications', authenticateToken, async (req, res) => {
+    const user_id = req.user.userId;
+
     try {
       const result = await pool.query(
-        'SELECT * FROM notifications ORDER BY created_at DESC'
+        'SELECT * FROM notifications where target_id = $1 ORDER BY created_at DESC', [user_id]
       );
       res.status(200).json(result.rows);
     } catch (error) {
@@ -259,6 +261,7 @@ app.delete('/users/:id/trip/:trip_id', async (req, res) => {
       res.status(500).json({ error: 'Chyba na serveri pri načítavaní notifikácií.' });
     }
   });
+
 
   app.get('users/:user_id/statistics', async (req, res) => {
     const user_id = parseInt(req.params.user_id);

@@ -120,6 +120,18 @@ module.exports = (app, pool, authenticateToken) => {
     }
 
 
+    /* Pomocná funkcia na poslanie notifikácie */
+    async function sendNotification(sender_id, target_id, trip_id) {
+        try {
+            await pool.query(
+                'INSERT INTO notifications (sender_id, target_id, trip_id, type) VALUES ($1, $2, $3, $4)',
+                [sender_id, target_id, trip_id, 'trip_share']
+            );
+        } catch (error) {
+            console.error('Chyba pri vytváraní notifikácie:', error);
+        }
+    }
+
 
 
 
@@ -228,8 +240,8 @@ module.exports = (app, pool, authenticateToken) => {
 
     /* edit trip, len to čo určím sa upraví */
     app.put('/users/:id/trip/:trip_id', async (req, res) => {
-        const user_id = parseInt(req.params.id); // používame ID z URL
-        const trip_id = parseInt(req.params.trip_id); // ID výletu
+        const user_id = parseInt(req.params.id);
+        const trip_id = parseInt(req.params.trip_id);
         const {
             trip_title,
             trip_description,
@@ -238,81 +250,55 @@ module.exports = (app, pool, authenticateToken) => {
             start_date,
             end_date
         } = req.body;
-        const allowedVisibility = ['public', 'private', 'friends'];
 
+        const allowedVisibility = ['public', 'private', 'friends'];
         if (visibility && !allowedVisibility.includes(visibility)) {
             return res.status(400).json({ error: 'Neplatná hodnota pre visibility' });
         }
 
         try {
-            // Over kontrolu používateľa
-            const userCheck = await pool.query(
-                'SELECT id FROM users WHERE id = $1',
-                [user_id]
-            );
-
+            // Overenie existencie používateľa
+            const userCheck = await pool.query('SELECT id FROM users WHERE id = $1', [user_id]);
             if (userCheck.rowCount === 0) {
                 return res.status(404).json({ error: 'Používateľ neexistuje' });
             }
 
-
-            /* či existuje trip */
-            const tripResult = await pool.query('SELECT * FROM trip WHERE trip_id = $1', [trip_id]);
-            if (tripResult.rowCount === 0) {
-                return res.status(404).json({ error: 'Trip neexistuje' });
+            // Overenie existencie tripu
+            const tripCheck = await pool.query('SELECT * FROM trip WHERE trip_id = $1 AND user_id = $2', [trip_id, user_id]);
+            if (tripCheck.rowCount === 0) {
+                return res.status(404).json({ error: 'Trip neexistuje alebo nepatrí používateľovi' });
             }
 
+            // Update s COALESCE - nemení hodnoty ak nie sú zadané
+            const updateQuery = `
+            UPDATE trip
+            SET 
+                trip_title = COALESCE($1, trip_title),
+                trip_description = COALESCE($2, trip_description),
+                rating = COALESCE($3, rating),
+                visibility = COALESCE($4, visibility),
+                start_date = COALESCE($5, start_date),
+                end_date = COALESCE($6, end_date)
+            WHERE user_id = $7 AND trip_id = $8
+            RETURNING *;
+            `;
 
-            // Skladanie aktualizačného dotazu
-            let updateQuery = 'UPDATE trip SET';
-            const updateValues = [];
-            let valueIndex = 1;
-
-            if (trip_title) {
-                updateQuery += ` trip_title = $${valueIndex},`;
-                updateValues.push(trip_title);
-                valueIndex++;
-            }
-            if (trip_description) {
-                updateQuery += ` trip_description = $${valueIndex},`;
-                updateValues.push(trip_description);
-                valueIndex++;
-            }
-            if (rating) {
-                updateQuery += ` rating = $${valueIndex},`;
-                updateValues.push(rating);
-                valueIndex++;
-            }
-            if (visibility) {
-                updateQuery += ` visibility = $${valueIndex},`;
-                updateValues.push(visibility);
-                valueIndex++;
-            }
-            if (start_date) {
-                updateQuery += ` start_date = $${valueIndex},`;
-                updateValues.push(start_date);
-                valueIndex++;
-            }
-            if (end_date) {
-                updateQuery += ` end_date = $${valueIndex},`;
-                updateValues.push(end_date);
-                valueIndex++;
-            }
-
-            // Odstránenie poslednej zbytočnej čiarky
-            updateQuery = updateQuery.slice(0, -1); // odstráni poslednú čiarku
-            updateQuery += ' WHERE user_id = $' + valueIndex + ' AND trip_id = $' + (valueIndex + 1) + ' RETURNING *';
-
-            updateValues.push(user_id);
-            updateValues.push(trip_id);
-
-            // Spustenie dotazu na aktualizáciu
-            const result = await pool.query(updateQuery, updateValues);
+            const result = await pool.query(updateQuery, [
+                trip_title ?? null,
+                trip_description ?? null,
+                rating ?? null,
+                visibility ?? null,
+                start_date ?? null,
+                end_date ?? null,
+                user_id,
+                trip_id
+            ]);
 
             res.status(200).json({
                 message: 'Výlet bol úspešne aktualizovaný',
                 trip: result.rows[0]
             });
+
         } catch (error) {
             console.error('Chyba pri aktualizácii výletu:', error);
             res.status(500).json({ error: 'Chyba na serveri' });
@@ -323,7 +309,7 @@ module.exports = (app, pool, authenticateToken) => {
     /* sort tripov usera */
     app.get('/trip/:trip_id/sort', authenticateToken, async (req, res) => {
         const { order } = req.query;
-        const user_id = req.user.user_id;
+        const user_id = req.user.userId;
 
         const sortOrder = (order === 'desc') ? 'DESC' : 'ASC'; // defaultne ASC
 
@@ -341,6 +327,100 @@ module.exports = (app, pool, authenticateToken) => {
             });
         } catch (err) {
             console.error('Chyba pri získavaní výletov:', err);
+            res.status(500).json({ error: 'Chyba na serveri' });
+        }
+    });
+
+
+    /* share trip */
+    app.post('/trip/:trip_id/share', authenticateToken, async (req, res) => {
+        const user_id = req.user.userId;
+        const { trip_id, target_user_id } = req.body;  // ID používateľa, ktorému chceme trip zdieľať
+
+        try {
+            /* či existuje ten, komu to chceme poslať */
+            const userCheck = await pool.query('SELECT id FROM users WHERE id = $1', [target_user_id]);
+            if (userCheck.rowCount === 0) {
+                return res.status(404).json({ error: 'Používateľ neexistuje' });
+            }
+
+            if (user_id === target_user_id) {
+                return res.status(404).json({ error: 'Cieľový používateľ nemôže byť odosielateľ.' });
+            }
+
+            /* či je to moj trip */
+            const tripCheck = await pool.query('SELECT * FROM trip WHERE trip_id = $1 AND user_id = $2', [trip_id, user_id]);
+            if (tripCheck.rowCount === 0) {
+                return res.status(404).json({ error: 'Trip neexistuje alebo nepatrí tomuto používateľovi' });
+            }
+
+            /* zoberiem trip a jeho visibility */
+            const trip = tripCheck.rows[0];
+
+            // Zdieľanie tripu je možné pre 'public' tripy alebo 'friends' tripy, podľa visibility
+            if (trip.visibility === 'public' || trip.visibility === 'friends') {
+                // Vytvoriť notifikáciu o zdieľaní
+                await sendNotification(user_id, target_user_id, trip_id);
+                return res.status(200).json({ message: 'Trip bol úspešne zdieľaný.' });
+            } else {
+                return res.status(403).json({ error: 'Tento trip nemôže byť zdieľaný.' }); /* lebo je private */
+            }
+
+        } catch (error) {
+            console.error('Chyba pri zdieľaní tripu:', error);
+            res.status(500).json({ error: 'Chyba na serveri' });
+        }
+    });
+
+
+    /* get shared trip */
+    app.get('/shared_trip/:trip_id', authenticateToken, async (req, res) => {
+        const user_id = req.user.id;  // Prístup používateľa cez autentifikáciu tokenu
+        const { trip_id } = req.params;
+
+        try {
+            // Over, či trip existuje
+            const tripResult = await pool.query('SELECT * FROM trip WHERE trip_id = $1', [trip_id]);
+
+            if (tripResult.rowCount === 0) {
+                return res.status(404).json({ error: 'Trip neexistuje' });
+            }
+
+            const trip = tripResult.rows[0];
+
+            /* public sa zobrazí každému */
+            if (trip.visibility === 'public') {
+                return res.status(200).json(trip);
+            }
+
+            /* ak je visibility friends, tak zistíme či je priatel usera ktorý to zdielal */
+            if (trip.visibility === 'friends') {
+                // len ak sú priatelia
+                const friendship = await pool.query(`
+                SELECT * FROM friends 
+                WHERE (
+                    (user_id = $1 AND friend_id = $2) OR 
+                    (user_id = $2 AND friend_id = $1)
+                ) AND status = 'accepted'
+                `, [req.user.userId, trip.user_id]);
+
+                if (friendship.rowCount > 0) {
+                    return res.status(200).json(trip);
+                } else {
+                    return res.status(403).json({ error: 'Nemáte oprávnenie zobraziť tento trip (friends only).' });
+                }
+
+            }
+
+            /* private trip, nemôže si ho pozrieť, prípad keď si vlastník prepne trip na privátny a potom to niekto otvorí  */
+            if (trip.visibility === 'private') {
+                return res.status(403).json({ error: 'Nemáte prístup k tomuto súkromnému tripu.' });
+            }
+
+            return res.status(400).json({ error: 'Neplatná hodnota pre visibility.' });
+
+        } catch (error) {
+            console.error('Chyba pri načítaní tripu:', error);
             res.status(500).json({ error: 'Chyba na serveri' });
         }
     });
@@ -495,7 +575,6 @@ module.exports = (app, pool, authenticateToken) => {
 
             }
 
-
             res.status(200).json({
                 message: 'Obrázky boli aktualizované',
                 addedImages: imageUrls,
@@ -548,4 +627,52 @@ module.exports = (app, pool, authenticateToken) => {
             res.status(500).json({ error: 'Chyba na serveri' });
         }
     });
+
+
+    /* updateMarker */
+    app.put('/markers/:marker_id', authenticateToken, async (req, res) => {
+        const { marker_id } = req.params;
+        const { marker_title, marker_description, trip_date } = req.body;
+        const user_id = req.user.userId;
+
+        try {
+            // Overenie, že marker patrí prihlásenému používateľovi
+            const check = await pool.query(
+                'SELECT * FROM markers WHERE marker_id = $1 AND user_id = $2',
+                [marker_id, user_id]
+            );
+
+            if (check.rowCount === 0) {
+                return res.status(404).json({ error: 'Marker neexistuje alebo k nemu nemáš prístup' });
+            }
+
+            // Update iba zadaných polí
+            const updateQuery = `
+                  UPDATE markers
+                  SET 
+                    marker_title = COALESCE($1, marker_title),
+                    marker_description = COALESCE($2, marker_description),
+                    trip_date = COALESCE($3, trip_date)
+                  WHERE marker_id = $4
+                  RETURNING *
+                `;
+
+            const result = await pool.query(updateQuery, [
+                marker_title || null,
+                marker_description || null,
+                trip_date || null,
+                marker_id
+            ]);
+
+            res.status(200).json({
+                message: 'Marker bol úspešne aktualizovaný',
+                marker: result.rows[0]
+            });
+
+        } catch (error) {
+            console.error('Chyba pri aktualizácii markeru:', error);
+            res.status(500).json({ error: 'Chyba na serveri' });
+        }
+    });
+
 }

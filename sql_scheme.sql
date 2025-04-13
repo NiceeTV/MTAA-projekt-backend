@@ -93,6 +93,7 @@ CREATE TABLE notifications (
   notification_id SERIAL PRIMARY KEY,
   sender_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   target_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  trip_id INT REFERENCES trip(trip_id),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   type message_type,
   CHECK (sender_id != target_id)
