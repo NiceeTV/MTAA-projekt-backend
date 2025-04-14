@@ -18,8 +18,11 @@
 - [✅] `DELETE /DeleteTrip`
 - [✅] `PUT /EditTrip`
 - [✅] `POST /UploadTripImages`
+- [✅] `POST /UploadProfilePicture`
 - [✅] `GET /GetTripByID`
 - [✅] `GET /GetTripImages`
+- [✅] `GET /singleTripImage`
+- [✅] `GET /loadProfilePicture`
 - [✅] `PUT EditTripImages`
 - [✅] `POST /ShareTrip` *(?)*
 - [✅] `GET /GetUserTrips`
