@@ -2,10 +2,12 @@ const express = require('express');
 const pool = require('./db');
 const app = express();
 const jwt = require('jsonwebtoken');
+const cors = require('cors');
 const path = require('path');
 
 app.use(express.json());
 app.use('/images', express.static(path.join(__dirname, 'public/images')));
+app.use(cors());
 
 function authenticateToken(req, res, next) {
   const token = req.header('Authorization')?.replace('Bearer ', '');
@@ -30,10 +32,10 @@ require('./api_endpoints1')(app, pool, authenticateToken);
 require('./api_endpoints2')(app, pool, authenticateToken);
 
 
-
+//pridať autentifikáciu k get obrázkom
 
 const PORT = 3000;
-const hostname = 'localhost';
+const hostname = '192.168.0.105';
 app.listen(PORT, hostname, () => {
   console.log(`Server beží na ${hostname}:${PORT}`);
 });

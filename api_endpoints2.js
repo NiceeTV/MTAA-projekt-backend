@@ -317,7 +317,7 @@ module.exports = (app, pool, authenticateToken) => {
 
 
     /* sort tripov usera */
-    app.get('/trip/:trip_id/sort', authenticateToken, async (req, res) => {
+    app.get('/trip/:user_id/sort', authenticateToken, async (req, res) => {
         const { order } = req.query;
         const user_id = req.user.userId;
 
