@@ -172,6 +172,14 @@ module.exports = (app, pool, authenticateToken) => {
               marker: result.rows[0]
             });
       } catch (error) {
+          if (error.code === '23505') {  // kód pre unique constraint violation v PostgreSQL
+            return res.status(400).json({
+              error: 'Marker na tomto mieste už existuje pre tohto používateľa.'
+            });
+          };
+
+
+
           console.error('Chyba pri vytváraní markeru:', error);
           res.status(500).json({ error: 'Chyba na serveri' });
     }
