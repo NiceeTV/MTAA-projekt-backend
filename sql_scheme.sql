@@ -75,7 +75,8 @@ CREATE TABLE markers (
   marker_title TEXT NOT NULL,
   marker_description TEXT,
   trip_date DATE,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT unique_marker_location UNIQUE (user_id, x_pos, y_pos)
 );
 
 

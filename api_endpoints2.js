@@ -612,7 +612,7 @@ module.exports = (app, pool, authenticateToken) => {
 
     /*** MARKERS ***/
     /* getUserMarkers */
-    app.get('/markers/getMarkersByID/:user_id', authenticateToken, async (req, res) => {
+    app.get('/markers/getUserMarkers/:user_id', authenticateToken, async (req, res) => {
         const { user_id } = req.params;  // Získame user_id z parametrov URL
 
         try {
