@@ -51,6 +51,57 @@ module.exports = (app, pool, authenticateToken) => {
     });
 
 
+app.put('/users/:id/biography', async (req, res) => {
+    const { id } = req.params;
+    const { bio } = req.body;
+
+    try {
+        const result = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
+        if (result.rowCount === 0) {
+            return res.status(404).send('Používateľ s týmto ID neexistuje');
+        }
+
+        const updateQuery = 'UPDATE users SET bio = $1 WHERE id = $2 RETURNING *';
+        const updatedUser = await pool.query(updateQuery, [bio, id]);
+
+        res.json(updatedUser.rows[0]);
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send('Chyba pri aktualizácii biografie');
+    }
+});
+
+app.put('/users/:id/profile_picture', async (req, res) => {
+    const { id } = req.params;
+    const { image_url } = req.body;  // Predpokladáme, že obsahuje URL obrázku
+
+    try {
+        const userResult = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
+        if (userResult.rowCount === 0) {
+            return res.status(404).send('Používateľ s týmto ID neexistuje');
+        }
+
+        // Skontrolujeme, či už existuje profilová fotka pre tohto používateľa
+        const pictureResult = await pool.query('SELECT * FROM profile_picture WHERE user_id = $1', [id]);
+
+        if (pictureResult.rowCount === 0) {
+            // Ak fotka neexistuje, vložíme novú
+            const insertQuery = 'INSERT INTO profile_picture (user_id, image_url) VALUES ($1, $2) RETURNING *';
+            const newPicture = await pool.query(insertQuery, [id, image_url]);
+            res.json(newPicture.rows[0]);
+        } else {
+            // Ak fotka existuje, aktualizujeme URL
+            const updateQuery = 'UPDATE profile_picture SET image_url = $1 WHERE user_id = $2 RETURNING *';
+            const updatedPicture = await pool.query(updateQuery, [image_url, id]);
+            res.json(updatedPicture.rows[0]);
+        }
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send('Chyba pri aktualizácii profilovej fotky');
+    }
+});
+
+
     /* pridaj user trip*/
     app.post('/users/:id/trip', async (req, res) => {
         const user_id = parseInt(req.params.id); // používame ID z URL
@@ -172,14 +223,6 @@ module.exports = (app, pool, authenticateToken) => {
               marker: result.rows[0]
             });
       } catch (error) {
-          if (error.code === '23505') {  // kód pre unique constraint violation v PostgreSQL
-            return res.status(400).json({
-              error: 'Marker na tomto mieste už existuje pre tohto používateľa.'
-            });
-          };
-
-
-
           console.error('Chyba pri vytváraní markeru:', error);
           res.status(500).json({ error: 'Chyba na serveri' });
     }
@@ -221,8 +264,6 @@ module.exports = (app, pool, authenticateToken) => {
     app.get('/markers/getMarkerByMarkerID/:marker_id', authenticateToken, async (req, res) => {
         const marker_id = parseInt(req.params.marker_id);
         const user_id = req.user.userId;
-
-        console.log("user id ", user_id);
 
         try {
             const result = await pool.query(
