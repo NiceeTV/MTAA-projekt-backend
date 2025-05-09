@@ -222,6 +222,8 @@ module.exports = (app, pool, authenticateToken) => {
         const marker_id = parseInt(req.params.marker_id);
         const user_id = req.user.userId;
 
+        console.log("user id ", user_id);
+
         try {
             const result = await pool.query(
                 'SELECT * FROM markers WHERE marker_id = $1 AND user_id = $2',
