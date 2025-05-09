@@ -38,6 +38,27 @@ module.exports = (app, pool, authenticateToken) => {
         }
     });
 
+app.get('/users/search/:username', async (req, res) => {
+    const { username } = req.params;
+
+    try {
+        const result = await pool.query(
+            'SELECT id, username FROM users WHERE username ILIKE $1',
+            [`%${username}%`]
+        );
+
+        console.log("Výsledok dotazu:", result.rows); // Pridaj log pre kontrolu odpovede
+        res.json(result.rows); // Vráti iba id a username
+    } catch (err) {
+        console.error('Chyba pri získavaní používateľa:', err.message);
+        res.status(500).send('Chyba pri získavaní používateľa');
+    }
+});
+
+
+
+
+
 
     /* všetci useri */
     app.get('/users', async (req, res) => {
