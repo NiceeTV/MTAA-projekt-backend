@@ -839,50 +839,70 @@ module.exports = (app, pool, authenticateToken) => {
 
     /* send friend request */
     app.post('/sendFriendRequest', authenticateToken, async (req, res) => {
-        const sender_id = req.user.userId;
-        const { target_user_id } = req.body;
+    const sender_id = req.user.userId;
+    const { target_user_id } = req.body;
 
-        if (sender_id === target_user_id) {
-            return res.status(400).json({ error: 'Nemôžete si poslať žiadosť o priateľstvo sám sebe.' });
+    if (sender_id === target_user_id) {
+        return res.status(400).json({ error: 'Nemôžete si poslať žiadosť o priateľstvo sám sebe.' });
+    }
+
+    try {
+        // Overenie, či cieľový používateľ existuje
+        const userCheck = await pool.query('SELECT id FROM users WHERE id = $1', [target_user_id]);
+        if (userCheck.rowCount === 0) {
+            return res.status(404).json({ error: 'Cieľový používateľ neexistuje.' });
         }
 
-        try {
-            /* či existuje target */
-            const userCheck = await pool.query('SELECT id FROM users WHERE id = $1', [target_user_id]);
-            if (userCheck.rowCount === 0) {
-                return res.status(404).json({ error: 'Cieľový používateľ neexistuje.' });
-            }
+        // Zistenie existujúceho priateľstva (akéhokoľvek statusu)
+        const existing = await pool.query(
+            `
+            SELECT * FROM friends 
+            WHERE (user_id = $1 AND friend_id = $2)
+               OR (user_id = $2 AND friend_id = $1)
+            `,
+            [sender_id, target_user_id]
+        );
 
-            /* či nie je o nich nejaký záznam už */
-            const existing = await pool.query(
-                `
-                SELECT * FROM friends 
-                WHERE (user_id = $1 AND friend_id = $2)
-                   OR (user_id = $2 AND friend_id = $1)
-                `,
-                [sender_id, target_user_id]
-            );
+        if (existing.rowCount > 0) {
+            const friendship = existing.rows[0];
 
-            if (existing.rowCount > 0) {
+            if (friendship.status === 'blocked') {
+                // Update status z 'blocked' na 'pending'
+                await pool.query(
+    `
+    UPDATE friends
+    SET status = 'pending', user_id = $1, friend_id = $2
+    WHERE (user_id = $1 AND friend_id = $2)
+       OR (user_id = $2 AND friend_id = $1)
+    `,
+    [sender_id, target_user_id]
+);
+
+
+                await sendNotification(sender_id, target_user_id, null, 'friend_request');
+                return res.status(200).json({ message: 'Žiadosť o priateľstvo bola odoslaná (obnovená z blokovania).' });
+            } else {
                 return res.status(400).json({ error: 'Žiadosť už existuje alebo ste už priatelia.' });
             }
-
-            /* vytvor žiadosť */
-            await pool.query(
-                `
-                INSERT INTO friends (user_id, friend_id, status)
-                VALUES ($1, $2, 'pending')
-                `,
-                [sender_id, target_user_id]
-            );
-
-            await sendNotification(sender_id, target_user_id, null, 'friend_request'); /* pošli notifikáciu */
-            res.status(200).json({ message: 'Žiadosť o priateľstvo bola odoslaná.' });
-        } catch (err) {
-            console.error('Chyba pri odosielaní žiadosti o priateľstvo:', err);
-            res.status(500).json({ error: 'Chyba na serveri.' });
         }
-    });
+
+        // Neexistuje žiadny záznam – vytvor nový
+        await pool.query(
+            `
+            INSERT INTO friends (user_id, friend_id, status)
+            VALUES ($1, $2, 'pending')
+            `,
+            [sender_id, target_user_id]
+        );
+
+        await sendNotification(sender_id, target_user_id, null, 'friend_request');
+        res.status(200).json({ message: 'Žiadosť o priateľstvo bola odoslaná.' });
+    } catch (err) {
+        console.error('Chyba pri odosielaní žiadosti o priateľstvo:', err);
+        res.status(500).json({ error: 'Chyba na serveri.' });
+    }
+});
+
 
 
     /* prijať priateľstvo */
@@ -892,7 +912,7 @@ module.exports = (app, pool, authenticateToken) => {
 
 
         /* či je správna odpoveď v requeste */
-        const validActions = ['accept', 'reject'];
+        const validActions = ['accept', 'decline'];
         if (!validActions.includes(action)) {
             return res.status(400).json({ error: 'Neplatná akcia. Použi "accept" alebo "decline".' });
         }
@@ -925,10 +945,15 @@ module.exports = (app, pool, authenticateToken) => {
             }
 
             /* friendship status */
-            let statusToUpdate = action === 'accept' ? 'accepted' : 'rejected';
+            let statusToUpdate = action === 'accept' ? 'accepted' : 'blocked';
 
-            /* aktualizuj status priatelstva */
             await pool.query(
+            `DELETE FROM notifications
+             WHERE target_id = $1 AND sender_id = $2 AND type = 'friend_request'`,
+            [user_id, sender_id]
+        );
+		
+		await pool.query(
                 `UPDATE friends SET status = $1 WHERE friendship_id = $2`,
                 [statusToUpdate, friendshipToUpdate]
             );
@@ -950,13 +975,14 @@ module.exports = (app, pool, authenticateToken) => {
 
             /* či sú priatelia */
             const existing = await pool.query(
-                `
-                SELECT * FROM friends
-                WHERE (user_id = $1 AND friend_id = $2)
-                   OR (user_id = $2 AND friend_id = $1)
-                `,
-                [friend_to_delete_id, user_id]
-            );
+    `
+    SELECT * FROM friends
+    WHERE (user_id = $1 AND friend_id = $2)
+       OR (user_id = $2 AND friend_id = $1)
+    `,
+    [friend_to_delete_id, user_id]
+);
+
 
             /* ak neexistuje, tak chyba */
             if (existing.rowCount === 0) {
