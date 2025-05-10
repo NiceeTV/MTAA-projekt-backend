@@ -17,6 +17,8 @@ module.exports = (app, pool, authenticateToken) => {
         if (userCheck.rowCount === 0) {
             return res.status(404).json({ error: 'Používateľ s týmto ID neexistuje' });
         }
+
+        return true;
     }
 
     async function checkTripExists(user_id,trip_id,res) {
@@ -24,6 +26,8 @@ module.exports = (app, pool, authenticateToken) => {
         if (tripCheck.rowCount === 0) {
             return res.status(404).json({error: 'Výlet s týmto ID neexistuje alebo nepatrí tomuto používateľovi'});
         }
+
+        return true;
     }
 
 
@@ -38,7 +42,8 @@ module.exports = (app, pool, authenticateToken) => {
 
         try {
             const userStatus = await checkUserExists(user_id, res);
-            if (userStatus) return userStatus;
+            if (!userStatus) return;
+
 
             const imageUrls = [];
 
@@ -48,7 +53,7 @@ module.exports = (app, pool, authenticateToken) => {
                 }
 
                 const tripStatus = await checkTripExists(user_id, trip_id, res);
-                if (tripStatus) return tripStatus;
+                if (!tripStatus) return;
 
                 // Získaj najvyššiu existujúcu pozíciu v DB
                 const result = await pool.query(
@@ -133,6 +138,34 @@ module.exports = (app, pool, authenticateToken) => {
     }
 
 
+    const validateToken = async (token) => {
+        try {
+            /* overíme podpis tokenu */
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+
+            /* nájdeme usera z tokena či je v db */
+            const result = await pool.query(
+                'SELECT * FROM users WHERE id = $1 AND username = $2',
+                [decoded.userId, decoded.username]
+            );
+
+
+            /* ak sa nenašiel, token je nesprávny alebo neukazuje na platného usera */
+            if (result.rows.length === 0) {
+                console.log("user neecistuje");
+                return { valid: false, reason: 'Používateľ neexistuje alebo nemá zadané používateľské meno.' };
+            }
+
+
+            const user = result.rows[0];
+
+            /* user a token je platný */
+            return { valid: true, user };
+        } catch (err) {
+            return { valid: false, reason: 'Neplatný token alebo podpis.', error: err.message };
+        }
+    };
 
 
     /*** ENDPOINTY ***/
@@ -219,6 +252,34 @@ module.exports = (app, pool, authenticateToken) => {
             res.status(500).json({ message: err.message });
         }
     });
+
+
+
+    /* autentifikuj token */
+    app.post('/validate-token', async (req, res) => {
+        const token = req.header('Authorization')?.replace('Bearer ', '');
+
+        if (!token) {
+            console.log("token nie je ");
+            return res.status(400).json({ valid: false, reason: 'No token provided' });
+        }
+
+        const result = await validateToken(token);
+
+        console.log("result je ",result);
+
+        if (!result.valid) {
+            console.log("token neplatný");
+            return res.status(401).json({ valid: false, reason: result.reason });
+        }
+
+        return res.status(200).json({
+            valid: true,
+            user: result.user,
+            message: 'Token is valid',
+        });
+    });
+
 
 
     /* trip management */
@@ -518,10 +579,11 @@ module.exports = (app, pool, authenticateToken) => {
         try {
             // Kontrola či existuje user a trip
             const userStatus = await checkUserExists(user_id, res);
-            if (userStatus) return userStatus;
+            if (!userStatus) return;
+
 
             const tripStatus = await checkTripExists(user_id, trip_id, res);
-            if (tripStatus) return tripStatus;
+            if (!tripStatus) return;
 
             // Spracovanie vymazania obrázkov
             const toDelete = JSON.parse(imagesToDelete || '[]'); // frontend pošle JSON.stringify([...])
@@ -616,21 +678,20 @@ module.exports = (app, pool, authenticateToken) => {
         const { user_id } = req.params;  // Získame user_id z parametrov URL
 
         try {
-            // SQL dopyt na získanie markerov používateľa
-            const query = `
-              SELECT *
-              FROM markers m
-              WHERE m.user_id = $1;
+            const userStatus = await checkUserExists(user_id, res);
+            if (!userStatus) return userStatus;
+
+
+            const markersQuery = `
+                SELECT * 
+                FROM markers m
+                WHERE m.user_id = $1;
             `;
 
-            const result = await pool.query(query, [user_id]);  // vykonáme dopyt
 
-            if (result.rows.length === 0) {
-                return res.status(404).json({ message: 'Žiadne markery alebo neexistujúci používateľ.' });
-            }
-
-            // Vrátime výsledky
-            res.status(200).json(result.rows);
+            /* vráti výsledok, môže poslať aj [] ak nemá markery */
+            const markersResult = await pool.query(markersQuery, [user_id]);
+            res.status(200).json(markersResult.rows);
 
         } catch (err) {
             console.error('Chyba pri získavaní markerov:', err);

@@ -35,7 +35,7 @@ require('./api_endpoints2')(app, pool, authenticateToken);
 //pridať autentifikáciu k get obrázkom
 
 const PORT = 3000;
-const hostname = '192.168.100.215';
+const hostname = '192.168.0.105';
 app.listen(PORT, hostname, () => {
   console.log(`Server beží na ${hostname}:${PORT}`);
 });
