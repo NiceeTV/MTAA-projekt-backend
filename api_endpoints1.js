@@ -133,8 +133,8 @@ app.put('/users/:id/profile_picture', async (req, res) => {
           visibility,
           start_date,
           end_date
-        } = req.body;
-      
+        } = req.body.tripData;
+
         try {
           // Over kontrolu používateľa
           const userCheck = await pool.query(
@@ -152,7 +152,7 @@ app.put('/users/:id/profile_picture', async (req, res) => {
               visibility, start_date, end_date
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7)
-            RETURNING *`,
+            RETURNING trip_id`,
             [
               user_id,
               trip_title,
@@ -163,7 +163,8 @@ app.put('/users/:id/profile_picture', async (req, res) => {
               end_date
             ]
           );
-      
+
+
           res.status(201).json({
             message: 'Výlet bol úspešne vytvorený',
             trip: result.rows[0]
@@ -291,6 +292,8 @@ app.put('/users/:id/profile_picture', async (req, res) => {
                 'SELECT * FROM markers WHERE marker_id = $1 AND user_id = $2',
                 [marker_id, user_id]
             );
+
+            console.log(result);
 
             if (result.rowCount === 0) {
                 return res.status(404).json({ error: 'Marker neexistuje alebo nepatrí používateľovi.' });

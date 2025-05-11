@@ -36,6 +36,7 @@ module.exports = (app, pool, authenticateToken) => {
         const { user_id, image_type, trip_id } = req.params;
         const files = req.files;
 
+
         if (!files || files.length === 0) {
             return res.status(400).json({ error: 'Žiadne obrázky neboli nahrané' });
         }
@@ -266,7 +267,6 @@ module.exports = (app, pool, authenticateToken) => {
 
         const result = await validateToken(token);
 
-        console.log("result je ",result);
 
         if (!result.valid) {
             console.log("token neplatný");
@@ -503,7 +503,7 @@ module.exports = (app, pool, authenticateToken) => {
     app.post('/upload-images/:user_id/:image_type', authenticateToken, upload.array('images'), handleImageUpload);
 
     /* nahranie trip obrázkov */
-    app.post('/upload-images/:user_id/:image_type/:trip_id', authenticateToken, upload.array('images'), handleImageUpload);
+    app.post('/upload-images/:user_id/:image_type/:trip_id', upload.array('images'), handleImageUpload);
 
 
     /* získanie obrázkov k tripu podla trip_id */
