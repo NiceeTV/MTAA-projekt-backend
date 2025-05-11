@@ -203,6 +203,14 @@ module.exports = (app, pool, authenticateToken) => {
                 [username, email, hashedPassword]
             );
 
+            const userId = newUser.rows[0].id;
+
+            await pool.query(
+                'INSERT INTO statistics (user_id, number_of_trips, total_distance, most_visited_place, time_spent_travelling) VALUES ($1, $2, $3, $4, $5)',
+                [userId, 0, 0, null, '0']
+            );
+
+
             //vytvor JWT token
             const token = jwt.sign(
                 { userId: newUser.rows[0].id, username: newUser.rows[0].username },
@@ -503,15 +511,18 @@ module.exports = (app, pool, authenticateToken) => {
     app.post('/upload-images/:user_id/:image_type', authenticateToken, upload.array('images'), handleImageUpload);
 
     /* nahranie trip obrázkov */
-    app.post('/upload-images/:user_id/:image_type/:trip_id', upload.array('images'), handleImageUpload);
+    app.post('/upload-images/:user_id/:image_type/:trip_id', authenticateToken, upload.array('images'), handleImageUpload);
 
 
     /* získanie obrázkov k tripu podla trip_id */
     app.get('/trip/:trip_id/images', async (req, res) => {
         const { trip_id } = req.params;  // získať trip_id z parametrov URL
 
+        console.log(trip_id);
+
         try {
             const tripResult = await pool.query('SELECT * FROM trip WHERE trip_id = $1', [trip_id]);
+
 
             /* či existuje trip */
             if (tripResult.rowCount === 0) {
@@ -521,9 +532,6 @@ module.exports = (app, pool, authenticateToken) => {
             /* obrázky pre daný trip */
             const imagesResult = await pool.query('SELECT image_url FROM trip_images WHERE trip_id = $1', [trip_id]);
 
-            if (imagesResult.rowCount === 0) {
-                return res.status(404).json({ error: 'Žiadne obrázky k tomuto tripu' });
-            }
 
             /* pole url obrázkov */
             const images = imagesResult.rows.map(row => row.image_url);
@@ -554,6 +562,9 @@ module.exports = (app, pool, authenticateToken) => {
     /* získanie jedného trip image obrázka z backendu cez url */
     app.get('/images/:user_id/trip_images/:trip_id/:filename', async (req, res) => {
         const { user_id, trip_id, filename } = req.params;
+
+        console.log(req.params);
+
         const imagePath = path.join(__dirname, 'images', user_id, 'trip_images', trip_id, filename);
         return sendImage(res, imagePath);
     });
@@ -752,6 +763,8 @@ module.exports = (app, pool, authenticateToken) => {
         const trip_id = parseInt(req.params.trip_id);
         const { marker_ids } = req.body; // očakávame pole
         const user_id = req.user.userId;
+
+        console.log(req.body);
 
         /* či obsahuje zoznam nejaké markery */
         if (!Array.isArray(marker_ids) || marker_ids.length === 0) {

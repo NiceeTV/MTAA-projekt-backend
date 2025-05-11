@@ -165,6 +165,12 @@ app.put('/users/:id/profile_picture', async (req, res) => {
           );
 
 
+          await pool.query(
+              'UPDATE statistics SET number_of_trips = number_of_trips + 1 WHERE user_id = $1',
+              [user_id]
+          );
+
+
           res.status(201).json({
             message: 'Výlet bol úspešne vytvorený',
             trip: result.rows[0]
