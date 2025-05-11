@@ -11,6 +11,7 @@ module.exports = (app, pool, authenticateToken) => {
     dotenv.config();  // Načítaj premenné z .env
 
 
+
     /*** FUNKCIE ***/
     async function checkUserExists(user_id, res) {
         const userCheck = await pool.query('SELECT * FROM users WHERE id = $1', [user_id]);
@@ -847,13 +848,13 @@ module.exports = (app, pool, authenticateToken) => {
     }
 
     try {
-        // Overenie, či cieľový používateľ existuje
+        // Over, či cieľový používateľ existuje
         const userCheck = await pool.query('SELECT id FROM users WHERE id = $1', [target_user_id]);
         if (userCheck.rowCount === 0) {
             return res.status(404).json({ error: 'Cieľový používateľ neexistuje.' });
         }
 
-        // Zistenie existujúceho priateľstva (akéhokoľvek statusu)
+        // Skontroluj, či už existuje nejaký vzťah
         const existing = await pool.query(
             `
             SELECT * FROM friends 
@@ -867,26 +868,30 @@ module.exports = (app, pool, authenticateToken) => {
             const friendship = existing.rows[0];
 
             if (friendship.status === 'blocked') {
-                // Update status z 'blocked' na 'pending'
+                // Update z "blocked" na "pending"
                 await pool.query(
-    `
-    UPDATE friends
-    SET status = 'pending', user_id = $1, friend_id = $2
-    WHERE (user_id = $1 AND friend_id = $2)
-       OR (user_id = $2 AND friend_id = $1)
-    `,
-    [sender_id, target_user_id]
-);
-
+                    `
+                    UPDATE friends
+                    SET status = 'pending', user_id = $1, friend_id = $2
+                    WHERE (user_id = $1 AND friend_id = $2)
+                       OR (user_id = $2 AND friend_id = $1)
+                    `,
+                    [sender_id, target_user_id]
+                );
 
                 await sendNotification(sender_id, target_user_id, null, 'friend_request');
-                return res.status(200).json({ message: 'Žiadosť o priateľstvo bola odoslaná (obnovená z blokovania).' });
+
+                // Získaj meno odosielateľa
+                const senderResult = await pool.query('SELECT username FROM users WHERE id = $1', [sender_id]);
+                const fromUsername = senderResult.rows[0]?.username || 'Používateľ';
+
+                return res.status(200).json({ message: 'Žiadosť bola odoslaná (obnovená z blokovania).' });
             } else {
                 return res.status(400).json({ error: 'Žiadosť už existuje alebo ste už priatelia.' });
             }
         }
 
-        // Neexistuje žiadny záznam – vytvor nový
+        // Ak neexistuje žiadny záznam
         await pool.query(
             `
             INSERT INTO friends (user_id, friend_id, status)
@@ -896,12 +901,18 @@ module.exports = (app, pool, authenticateToken) => {
         );
 
         await sendNotification(sender_id, target_user_id, null, 'friend_request');
+
+        // Získaj meno odosielateľa
+        const senderResult = await pool.query('SELECT username FROM users WHERE id = $1', [sender_id]);
+        const fromUsername = senderResult.rows[0]?.username || 'Používateľ';
+
         res.status(200).json({ message: 'Žiadosť o priateľstvo bola odoslaná.' });
     } catch (err) {
         console.error('Chyba pri odosielaní žiadosti o priateľstvo:', err);
         res.status(500).json({ error: 'Chyba na serveri.' });
     }
 });
+
 
 
 

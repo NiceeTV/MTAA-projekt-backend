@@ -4,6 +4,12 @@ const app = express();
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
 const path = require('path');
+const http = require('http');
+const WebSocket = require('ws');
+
+// HTTP server (potrebné pre WebSocket)
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server }); // pripoj WebSocket server na rovnaký HTTP server
 
 app.use(express.json());
 app.use('/images', express.static(path.join(__dirname, 'public/images')));
@@ -21,23 +27,35 @@ function authenticateToken(req, res, next) {
       return res.status(403).json({ message: 'Invalid or expired token' });
     }
 
-
-    req.user = decoded; // uloženie používateľských informácií
-    next(); // pokračovanie v spracovaní požiadavky
+    req.user = decoded;
+    next();
   });
 }
-
 
 require('./api_endpoints1')(app, pool, authenticateToken);
 require('./api_endpoints2')(app, pool, authenticateToken);
 
+// WebSocket logika
+wss.on('connection', (ws) => {
+  console.log('📡 Klient sa pripojil na WebSocket');
 
-//pridať autentifikáciu k get obrázkom
+  ws.on('message', (message) => {
+    console.log('📨 Správa od klienta:', message.toString());
+  });
 
-const PORT = 3000;
-const hostname = '192.168.0.105';
-app.listen(PORT, hostname, () => {
-  console.log(`Server beží na ${hostname}:${PORT}`);
+  // Poslať notifikáciu iba raz
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send('Zdraví vás naša aplikácia!');
+    console.log('📩 Notifikácia poslaná.');
+  }
+
+  ws.on('close', () => {
+    console.log('❌ Klient sa odpojil');
+  });
 });
 
-module.exports = { authenticateToken };
+const PORT = 3000;
+const hostname = '192.168.100.219';
+server.listen(PORT, hostname, () => {
+  console.log(`🌐 Server beží na http://${hostname}:${PORT}`);
+});
