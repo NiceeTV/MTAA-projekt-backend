@@ -55,7 +55,7 @@ wss.on('connection', (ws) => {
 });
 
 const PORT = 3000;
-const hostname = '192.168.100.219';
+const hostname = '192.168.0.105';
 server.listen(PORT, hostname, () => {
   console.log(`🌐 Server beží na http://${hostname}:${PORT}`);
 });

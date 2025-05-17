@@ -7,10 +7,12 @@ module.exports = (app, pool, authenticateToken) => {
     const fs = require('fs');
     const jwt = require('jsonwebtoken'); // Načítaj knižnicu pre JWT
     const dotenv = require('dotenv');    // Načítaj .env
-    //require('./api_endpoints1')(app, pool);
+    const fetch = (url, init) => import('node-fetch').then(module => module.default(url, init));
+
     dotenv.config();  // Načítaj premenné z .env
 
-
+    const GROQ_API_KEY = process.env.API_KEY;
+    console.log(GROQ_API_KEY);
 
     /*** FUNKCIE ***/
     async function checkUserExists(user_id, res) {
@@ -1000,12 +1002,12 @@ module.exports = (app, pool, authenticateToken) => {
             /* či sú priatelia */
             const existing = await pool.query(
     `
-    SELECT * FROM friends
-    WHERE (user_id = $1 AND friend_id = $2)
-       OR (user_id = $2 AND friend_id = $1)
-    `,
-    [friend_to_delete_id, user_id]
-);
+                SELECT * FROM friends
+                WHERE (user_id = $1 AND friend_id = $2)
+                   OR (user_id = $2 AND friend_id = $1)
+                `,
+                [friend_to_delete_id, user_id]
+            );
 
 
             /* ak neexistuje, tak chyba */
@@ -1143,6 +1145,93 @@ module.exports = (app, pool, authenticateToken) => {
             res.status(500).json({ error: 'Chyba na serveri' });
         }
     });
+
+
+
+    /** AI CHAT ASISTENT **/
+
+
+    const custom_instructions =
+    `
+        Si AI asistent na cestovanie. Odpovedaj len na otázky týkajúce sa cestovania podľa týchto pravidiel:
+        
+        1) Ak sa pýtaš na zaujímavé miesta v okolí, použij uvedenú lokalitu. Ak nie je, použi defaultnú lokalitu: Bratislava, Slovensko.  
+        Vypíš aspoň 3 miesta v tvare:  
+        Názov miesta: [lat, lon]  
+        Ku každému miestu daj aj krátky popis.
+        Ak sa používateľ pýta na reštaurácie, kaviarne alebo iné služby priamo súvisiace s cestovaním a turizmom, vypíš aspoň 3 odporúčané miesta s krátkym popisom a súradnicami v rovnakom formáte.
+        Na konci správy daj znak #.
+        
+        2) Ak používateľ chce viacdňový výlet, vytvor itinerár na 3 dni (ak nie je inak uvedené).  
+        Pre každý deň uveď aspoň 2 až 3 miesta.
+        Formát:
+        Deň n:
+        Názov miesta: [lat, lon]
+        krátky popis
+        Názov miesta: [lat, lon]
+        krátky popis
+        (prípadne ďalšie miesta...)
+        Na konci správy daj znak $.
+        
+        3) Pri otázkach o faktických informáciách o cestovaní (doprava, víza, fakty) odpovedz normálne a na konci daj znak %.
+        
+        4) Ak otázka nesúvisí s cestovaním, odpovedz:  
+        "Nemôžem odpovedať na otázky, ktoré nesúvisia s cestovaním."&
+        
+        Používaj súradnice vždy v dekadickom formáte v hranatých zátvorkách [lat, lon]. Nepoužívaj iné textové dekorácie.  
+        Nepíš vstupné otázky ani lokality.  
+        
+        5) Ak používateľ napíše všeobecné správy ako „ďakujem“, „super“, „skvelé“, „ahoj“ alebo podobne, odpovedz zdvorilo krátkou vetou (napr. „Rádo sa stalo.“, „Som tu pre teba.“) a zakonči odpoveď znakom &
+    
+        Pre každé miesto uveď unikátne a čo najpresnejšie súradnice v dekadickom formáte (napr. 48.8584° N, 2.2945° E). Nikdy nezdieľaj rovnaké súradnice pre rôzne miesta. Ak nevieš presné súradnice, uveď približné, ale odlišné hodnoty.
+        Neuvádzaj žiadne textové hlavičky ani vysvetlivky typu 'Názov miesta' alebo 'Krátky popis'. Iba napíš názov, súradnice v hranatých zátvorkách a hneď pod tým krátky popis bez ďalších textových značiek.
+    `
+
+
+
+
+
+
+
+    app.post('/chat', async (req, res) => {
+        try {
+            const { messages } = req.body;
+
+            console.log(messages);
+
+            const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${GROQ_API_KEY}`, // Z .env
+                },
+                body: JSON.stringify({
+                    model: 'mistral-saba-24b',
+                    messages: [
+                        {
+                            role: 'system',
+                            content: custom_instructions,
+                        },
+                        ...messages,
+                    ],
+                    temperature: 0.2,
+                    max_tokens: 1024,
+                }),
+            });
+
+            const data = await response.json();
+
+            if (data?.choices?.[0]?.message) {
+                res.json({ reply: data.choices[0].message });
+            } else {
+                res.status(500).json({ error: 'Neprišla odpoveď od Groq.' });
+            }
+        } catch (error) {
+            console.error('Chyba pri volaní Groq API:', error);
+            res.status(500).json({ error: 'Chyba pri komunikácii s Groq API.' });
+        }
+    });
+
 
 
 }
