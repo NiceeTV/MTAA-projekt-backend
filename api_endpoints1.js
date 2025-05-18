@@ -235,6 +235,7 @@ app.put('/users/:id/profile_picture', async (req, res) => {
 
   /* vytvor marker */
   app.post('/markers', authenticateToken, async (req, res) => {
+      console.log(req.body);
       const { x_pos, y_pos, marker_title, marker_description, trip_date } = req.body;
       const user_id = req.user.userId;  // Predpokladáme, že user_id je v decoded objekte
 

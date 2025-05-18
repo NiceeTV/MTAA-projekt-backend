@@ -12,7 +12,8 @@ module.exports = (app, pool, authenticateToken) => {
     dotenv.config();  // Načítaj premenné z .env
 
     const GROQ_API_KEY = process.env.API_KEY;
-    console.log(GROQ_API_KEY);
+    const GOOGLE_MAPS_API = process.env.GOOGLE_MAPS_API;
+
 
     /*** FUNKCIE ***/
     async function checkUserExists(user_id, res) {
@@ -1150,56 +1151,265 @@ module.exports = (app, pool, authenticateToken) => {
 
     /** AI CHAT ASISTENT **/
 
+    const custom_instructions_type1 = `
+        Si AI asistent na cestovanie. Vyhodnoť vstup používateľa a vykonaj jedno z nasledujúcich:
 
-    const custom_instructions =
+        1. Ak ide o požiadavku typu:
+           - typ_1: 3 zaujímavé miesta v okolí, ak nie je určený iný počet (iba jeden typ miest)
+           - typ_2: plánovanie viacdňového výletu, 3 dni ak nie je určené inak a pre každý deň 2 až 3 miesta (môže obsahovať viac typov miest)
+           
+          → typ_1 smie obsahovať **len jeden typ miesta**, ktorý najlepšie zodpovedá zadaniu. Povolené typy:
+             - "tourist_attraction"
+             - "restaurant"
+             
+        → Vráť výhradne štruktúrovaný JSON výstup v tomto formáte:
+      
+        {
+          "type": "typ_X",
+          "location": "určená lokalita alebo null",
+          "days": počet_dní (iba pri typ_2),
+          "itinerary": {
+            "day1": { "tourist_attraction": x } // alebo restaurant, ale len jeden typ pri typ_1
+          }
+        }
+        
+        
+        Pre typ_2 použi takýto formát: (môžeš použiť viac typov)
+        {
+          "type": "typ_X",
+          "location": "určená lokalita alebo null",
+          "days": počet_dní (iba pri typ_2),
+          "itinerary": {
+            "day1": { "tourist_attraction": x, "restaurant": y },
+            "day2": { ... },
+            ...
+          }
+        }
+        
+        2. Ak ide o:
+           - typ_3: otázka o faktoch o cestovaní (víza, doprava, mena, zvyky atď.)
+           → Odpovedz priamo na otázku faktickou odpoveďou. Na konci odpovede pridaj znak \`%\`.
+        
+        3. Ak ide o:
+           - typ_4: pozdrav, poďakovanie alebo iná zdvorilostná fráza  
+            → Odpovedz krátkou vetou (napr. "Ahoj! Som tu pre teba.") a na konci odpovede pridaj znak \`&\`.
+        
+        4. Ak ide o:
+           - typ_5: otázka nesúvisiaca s cestovaním  
+           → Odpovedz vetou: „Nemôžem odpovedať na otázky, ktoré nesúvisia s cestovaním.“ Na konci odpovede pridaj znak \`&\`.
+        
+        Používaj iba tieto kategórie typov (typ_1 až typ_5).  
+        Nikdy nespájaj JSON výstup s iným typom odpovede. Ak vraciaš JSON, nevypisuj nič iné.  
+        Ak odpovedáš na typ_3, 4 alebo 5, nevypisuj JSON.
+        
+        ### Príklady:
+        
+        #### Vstup: Kam ísť v okolí Pezinka?
+        \`\`\`json
+        {
+          "type": "typ_1",
+          "location": "Pezinok, Slovensko",
+          "days": 1,
+          "itinerary": {
+            "day1": {
+              "tourist_attraction": 3
+            }
+          }
+        }
+        \`\`\`
+        
+        #### Vstup: Naplánuj mi 3 dni v Trenčíne.
+        \`\`\`json
+        {
+          "type": "typ_2",
+          "location": "Trenčín",
+          "days": 3,
+          "itinerary": {
+            "day1": {
+              "tourist_attraction": 2,
+              "restaurant": 1
+            },
+            "day2": {
+              "tourist_attraction": 3
+            },
+            "day3": {
+              "tourist_attraction": 2,
+              "restaurant": 2
+            }
+          }
+        }
+        \`\`\`
+        
+        #### Vstup: Potrebujem víza do Kanady?
+        **Odpoveď:** Občania Slovenska potrebujú eTA – elektronickú cestovnú autorizáciu – pre vstup do Kanady na turistiku.%  
+        
+        #### Vstup: Ďakujem!
+        **Odpoveď:** Rádo sa stalo.&
+        
+        #### Vstup: Kto vyhral MS v hokeji?
+        **Odpoveď:** Nemôžem odpovedať na otázky, ktoré nesúvisia s cestovaním.&
     `
-        Si AI asistent na cestovanie. Odpovedaj len na otázky týkajúce sa cestovania podľa týchto pravidiel:
-        
-        1) Ak sa pýtaš na zaujímavé miesta v okolí, použij uvedenú lokalitu. Ak nie je, použi defaultnú lokalitu: Bratislava, Slovensko.  
-        Vypíš aspoň 3 miesta v tvare:  
-        Názov miesta: [lat, lon]  
-        Ku každému miestu daj aj krátky popis.
-        Ak sa používateľ pýta na reštaurácie, kaviarne alebo iné služby priamo súvisiace s cestovaním a turizmom, vypíš aspoň 3 odporúčané miesta s krátkym popisom a súradnicami v rovnakom formáte.
-        Na konci správy daj znak #.
-        
-        2) Ak používateľ chce viacdňový výlet, vytvor itinerár na 3 dni (ak nie je inak uvedené).  
-        Pre každý deň uveď aspoň 2 až 3 miesta.
-        Formát:
-        Deň n:
-        Názov miesta: [lat, lon]
-        krátky popis
-        Názov miesta: [lat, lon]
-        krátky popis
-        (prípadne ďalšie miesta...)
-        Na konci správy daj znak $.
-        
-        3) Pri otázkach o faktických informáciách o cestovaní (doprava, víza, fakty) odpovedz normálne a na konci daj znak %.
-        
-        4) Ak otázka nesúvisí s cestovaním, odpovedz:  
-        "Nemôžem odpovedať na otázky, ktoré nesúvisia s cestovaním."&
-        
-        Používaj súradnice vždy v dekadickom formáte v hranatých zátvorkách [lat, lon]. Nepoužívaj iné textové dekorácie.  
-        Nepíš vstupné otázky ani lokality.  
-        
-        5) Ak používateľ napíše všeobecné správy ako „ďakujem“, „super“, „skvelé“, „ahoj“ alebo podobne, odpovedz zdvorilo krátkou vetou (napr. „Rádo sa stalo.“, „Som tu pre teba.“) a zakonči odpoveď znakom &
-    
-        Pre každé miesto uveď unikátne a čo najpresnejšie súradnice v dekadickom formáte (napr. 48.8584° N, 2.2945° E). Nikdy nezdieľaj rovnaké súradnice pre rôzne miesta. Ak nevieš presné súradnice, uveď približné, ale odlišné hodnoty.
-        Neuvádzaj žiadne textové hlavičky ani vysvetlivky typu 'Názov miesta' alebo 'Krátky popis'. Iba napíš názov, súradnice v hranatých zátvorkách a hneď pod tým krátky popis bez ďalších textových značiek.
-    `
+
+    function parseResponse(response) {
+        // Pokús sa najprv parsovať JSON
+
+        const responseText = response.content;
+        try {
+            // Odstránim prípadné ```json bloky a trimnem
+            const cleaned = responseText.replace(/```json|```/g, '').trim();
+            const json = JSON.parse(cleaned);
+
+            // Ak sa podarilo, vrátime typ a parsed JSON
+            return { type: json.type, data: json };
+        } catch {
+            // Ak nie JSON, rozlíš typ podľa koncového znaku alebo textu
+
+            if (responseText.endsWith('%')) {
+                return { type: 'typ_3', data: responseText };
+            } else if (responseText.endsWith('&')) {
+                if (responseText.includes('Nemôžem odpovedať')) {
+                    return { type: 'typ_5', data: responseText };
+                } else {
+                    return { type: 'typ_4', data: responseText };
+                }
+            } else {
+                // Ak nevieš rozlíšiť, môžeš defaultne použiť typ_5 alebo typ_3
+                return { type: 'unknown', data: responseText };
+            }
+        }
+    }
+
+    function countPlaceTypes(data) {
+        const counts = {};
+
+        if (!data) return counts;
+
+        for (const dayKey in data) {
+            const day = data[dayKey];
+            for (const placeType in day) {
+                const count = day[placeType];
+                if (typeof count === 'number') {
+                    counts[placeType] = (counts[placeType] || 0) + count;
+                }
+            }
+        }
+
+        return counts;
+    }
 
 
+    async function geocodeLocation(location) {
+        const encodedPlace = encodeURIComponent(location);
+        console.log(location);
+        const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodedPlace}&key=${GOOGLE_MAPS_API}`;
+
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (data.status === "OK") {
+            const { lat, lng } = data.results[0].geometry.location;
+            return { lat, lng };
+        } else {
+            throw new Error(`Geocoding failed: ${data.status}`);
+        }
+    }
 
 
+    async function searchPlaces(lat, lng, type, limit) {
+        const radius = 5000; // polomer v metroch, uprav podľa potreby
+        console.log(lat,lng);
+        const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radius}&type=${type}&key=${GOOGLE_MAPS_API}`;
+
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (data.status === "OK") {
+            // vyber prvých 'limit' miest
+            console.log(data.results.length, limit);
+
+            const filtered = data.results
+                .filter(place => place.types && place.types.includes(type)) // miesto obsahuje požadovaný typ
+                .map(place => ({
+                    name: place.name,
+                    location: place.geometry.location,
+                    place_id: place.place_id,
+                    rating: place.rating ?? 0, // ak rating chýba, použije 0
+                    types: place.types,
+                }))
+                .sort((a, b) => b.rating - a.rating) // zoradenie podľa ratingu
+                .slice(0, limit); // obmedzi počet na požadovaný limit
+
+            console.log(filtered);
+
+            return filtered;
+
+        } else {
+            throw new Error(`Places API error: ${data.status}`);
+        }
+    }
+
+    async function getPlacesForItinerary(location, itinerary) {
+        const coords = await geocodeLocation(location);
+        const enrichedItinerary = {};
+        const usedPlaceIds = new Set();
+
+        const totalTypeCounts = countPlaceTypes(itinerary);
 
 
+        const allPlacesByType = {};
+        for (const [type, totalCount] of Object.entries(totalTypeCounts)) {
+            console.log(`Fetching ${totalCount} for type: ${type}`);
+            const results = await searchPlaces(coords.lat, coords.lng, type, totalCount);
+            // Zoradíme podľa ratingu a uložíme
+            allPlacesByType[type] = results
+                .filter(place => place.types.includes(type))
+                .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))
+                .slice(0, totalCount);
+        }
+
+        for (const [day, types] of Object.entries(itinerary)) {
+            enrichedItinerary[day] = [];
+
+            for (const [type, count] of Object.entries(types)) {
+                const pool = allPlacesByType[type] || [];
+
+                let i = 0;
+                while (enrichedItinerary[day].length < count && i < pool.length) {
+                    const place = pool[i];
+                    if (!usedPlaceIds.has(place.place_id)) {
+                        enrichedItinerary[day].push(place);
+                        usedPlaceIds.add(place.place_id);
+                    }
+                    i++;
+                }
+            }
+        }
+
+        return enrichedItinerary;
+    }
+
+    function simplifyItinerary(itinerary) {
+        const simplified = {};
+
+        for (const [day, places] of Object.entries(itinerary)) {
+            simplified[day] = places.map(place => ({
+                name: place.name,
+                lat: place.location.lat,
+                lng: place.location.lng
+            }));
+        }
+
+        return simplified;
+    }
 
     app.post('/chat', async (req, res) => {
         const { messages } = req.body;
 
+
         const fullMessages = [
             {
                 role: 'system',
-                content: custom_instructions,
+                content: custom_instructions_type1,
             },
             ...messages,
         ];
@@ -1214,7 +1424,7 @@ module.exports = (app, pool, authenticateToken) => {
                 body: JSON.stringify({
                     model,
                     messages: fullMessages,
-                    temperature: 0.2,
+                    temperature: 1,
                     max_tokens: 1024,
                 }),
             });
@@ -1223,19 +1433,36 @@ module.exports = (app, pool, authenticateToken) => {
         };
 
         try {
-            console.log("Volám primárny model: mistral-saba-24b");
+            console.log("Volám primárny model: llama-3-70b-instruct");
 
-            let data = await callGroqModel('mistral-saba-24b');
-
-            if (!data?.choices?.[0]?.message) {
-                console.warn("Primárny model nezareagoval, skúšam fallback...");
-
-                data = await callGroqModel('meta-llama/llama-4-maverick-17b-128e-instruct');
-            }
+            let data = await callGroqModel('meta-llama/llama-4-maverick-17b-128e-instruct');
 
             if (data?.choices?.[0]?.message) {
                 console.log("Odpoveď:", data.choices[0].message);
-                res.json({ reply: data.choices[0].message });
+
+                const parsed = parseResponse(data.choices[0].message);
+
+                if (parsed.type !== 'typ_1' && parsed.type !== 'typ_2') {
+                    res.json({ reply: data.choices[0].message });
+                    return;
+                }
+
+
+                /* nájdeme miesta a vložíme do itinerára */
+                const result = await getPlacesForItinerary(parsed.data.location, parsed.data.itinerary);
+
+                /* zjednodušíme itinerár len na to, čo potrebujeme na frontende */
+                const simplified = simplifyItinerary(result);
+                console.log(JSON.stringify(simplified, null, 2));
+
+
+
+                res.json({
+                    reply: {
+                        role: "assistant",
+                        content: simplified
+                    }
+                });
             } else {
                 res.status(500).json({ error: 'Neprišla odpoveď od Groq.' });
             }
@@ -1244,6 +1471,7 @@ module.exports = (app, pool, authenticateToken) => {
             res.status(500).json({ error: 'Chyba pri komunikácii s Groq API.' });
         }
     });
+
 
 
 
