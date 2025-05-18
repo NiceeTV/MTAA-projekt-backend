@@ -1194,34 +1194,47 @@ module.exports = (app, pool, authenticateToken) => {
 
 
     app.post('/chat', async (req, res) => {
-        try {
-            const { messages } = req.body;
+        const { messages } = req.body;
 
-            console.log(messages);
+        const fullMessages = [
+            {
+                role: 'system',
+                content: custom_instructions,
+            },
+            ...messages,
+        ];
 
+        const callGroqModel = async (model) => {
             const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    Authorization: `Bearer ${GROQ_API_KEY}`, // Z .env
+                    Authorization: `Bearer ${GROQ_API_KEY}`,
                 },
                 body: JSON.stringify({
-                    model: 'mistral-saba-24b',
-                    messages: [
-                        {
-                            role: 'system',
-                            content: custom_instructions,
-                        },
-                        ...messages,
-                    ],
+                    model,
+                    messages: fullMessages,
                     temperature: 0.2,
                     max_tokens: 1024,
                 }),
             });
 
-            const data = await response.json();
+            return response.json();
+        };
+
+        try {
+            console.log("Volám primárny model: mistral-saba-24b");
+
+            let data = await callGroqModel('mistral-saba-24b');
+
+            if (!data?.choices?.[0]?.message) {
+                console.warn("Primárny model nezareagoval, skúšam fallback...");
+
+                data = await callGroqModel('meta-llama/llama-4-maverick-17b-128e-instruct');
+            }
 
             if (data?.choices?.[0]?.message) {
+                console.log("Odpoveď:", data.choices[0].message);
                 res.json({ reply: data.choices[0].message });
             } else {
                 res.status(500).json({ error: 'Neprišla odpoveď od Groq.' });
